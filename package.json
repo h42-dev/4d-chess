@@ -14,6 +14,7 @@
     "deploy": "npm run build && firebase deploy --only hosting:four-d-chess,firestore:rules"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@fontsource/noto-sans-symbols-2": "^5.3.0",
     "firebase": "^12.19.0",
     "react": "^19.2.8",

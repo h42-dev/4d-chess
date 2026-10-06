@@ -1243,3 +1243,48 @@ nav.top {
 .card.note { font-size: 13px; color: var(--muted); }
 .share-line { margin: 0; font-size: 12.5px; color: var(--muted); text-align: center; }
 .share-line .link { font-size: 12.5px; padding: 0 2px; }
+
+/* =========================================================================
+   AI players
+   ========================================================================= */
+.ai-slots { display: grid; gap: 10px; }
+.ai-slots.two { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.ai-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.ai-slot-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ai-slot-head b { font-size: 14px; }
+.ai-slot select, .ai-slot .text-input { font-size: 13.5px; }
+.ai-slot select {
+  flex: 1;
+  max-width: 260px;
+  font: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 10px;
+}
+.ai-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.ai-field a { color: var(--future-hi); }
+.ai-field .text-input { min-width: 0; width: 100%; }
+.ai-slot .hint-text { font-size: 12.5px; margin: 0; }
+.ai-test { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12.5px; }
+.ai-test button { font-size: 13px; padding: 6px 12px; }
+.ai-test-ok { color: #7ee2a8; }
+.ai-test-error { color: #ff8a8f; }
+.ai-test-busy { color: var(--muted); }
+.ai-privacy { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.ai-privacy label { color: var(--text); font-size: 13px; display: flex; align-items: center; gap: 4px; }
+.ai-error .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.ai-control { flex-direction: row; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.ai-comment { font-size: 12.5px; color: var(--text); font-style: italic; opacity: 0.9; }
+.ai-note { font-size: 11.5px; color: var(--muted); }
+.think-timer { margin-left: 4px; font-variant-numeric: tabular-nums; opacity: 0.8; }

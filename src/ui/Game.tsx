@@ -13,6 +13,8 @@ import { RIBBON_FUTURE, TimeRibbon } from './TimeRibbon';
 import { TimePicker } from './TimePicker';
 import { TimeStack } from './TimeStack';
 import type { OnlineGame } from '../online/session';
+import { builtinLevel, playerName, type AiPlayer } from '../ai/types';
+import type { BotLevel } from '../engine/bot';
 
 interface Entry {
   state: GameState;
@@ -22,6 +24,15 @@ interface Entry {
   by?: Color;
   captured?: Piece;
   events: TimeEvent[];
+  /** an AI's one-line explanation of its move */
+  comment?: string;
+  /** e.g. "the built-in bot moved for Claude" */
+  note?: string;
+}
+
+interface MoveMeta {
+  comment?: string;
+  note?: string;
 }
 
 /** What the game screen needs to play online; moves come from and go to the shared game. */
@@ -48,10 +59,10 @@ type View = 'board' | 'stack';
 
 const start = (config: GameConfig) => newGame({ levels: config.variant === '4d' ? 3 : 1, rules: config.rules });
 
-function makeEntry(s: GameState, m: Move): Entry {
+function makeEntry(s: GameState, m: Move, meta: MoveMeta = {}): Entry {
   const { state, events } = applyMove(s, m);
   const captured = s.pieces.find((p) => p.id === m.capture);
-  return { state, move: m, notation: moveText(s, m), text: describeMove(s, m), by: sideToMove(s), captured, events };
+  return { state, move: m, notation: moveText(s, m), text: describeMove(s, m), by: sideToMove(s), captured, events, ...meta };
 }
 
 /** Finds the legal move matching one received from the other player, or null if it isn't legal. */
@@ -81,7 +92,9 @@ export function Game({ config, online, onMenu, onRules }: Props) {
   const [focus, setFocus] = useState<Focus>(null);
   const [view, setView] = useState<View>('board');
   const [level, setLevel] = useState(() => startLevel(config.variant === '4d' ? 3 : 1));
-  const [manualFlip, setManualFlip] = useState((config.mode === 'bot' || config.mode === 'online') && config.human === 'b');
+  const [manualFlip, setManualFlip] = useState((config.mode === 'bot' || config.mode === 'online' || config.mode === 'ai') && config.human === 'b');
+  const [paused, setPaused] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
   const [promo, setPromo] = useState<Move[] | null>(null);
   const [picker, setPicker] = useState<{ sq: number; other: Piece | null; floating?: boolean } | null>(null);
   const [previewDt, setPreviewDt] = useState<number | null>(null);
@@ -169,7 +182,17 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     if (onlineFlag && setOnlineResult) setOnlineResult({ winner: turn === 'w' ? 'b' : 'w', reason: `${colorName(turn)} ran out of time` });
   }, [onlineFlag, setOnlineResult, turn]);
 
-  const botTurn = config.mode === 'bot' && turn !== config.human && !result;
+  // Who plays the side to move: a person at this screen (null), the built-in bot, or a connected AI.
+  const seat: AiPlayer | null = useMemo(() => {
+    if (config.mode === 'ai') return config.ai?.[turn] ?? null;
+    if (config.mode === 'bot' && turn !== config.human) return { provider: 'builtin', model: config.level };
+    return null;
+  }, [config, turn]);
+  const botTurn = !!seat && !result;
+  const aiVsAi = config.mode === 'ai' && !!config.ai?.w && !!config.ai?.b;
+  /** the colour of the one human at this screen, when there is exactly one */
+  const humanColor: Color | null =
+    config.mode === 'bot' ? config.human : config.mode === 'ai' && !aiVsAi ? (config.ai?.w ? 'b' : 'w') : null;
   const waiting = online?.game.status === 'waiting';
   const canAct = !result && !botTurn && (!online || (online.me === turn && !waiting));
   const flipped = config.mode === 'local' && settings.autoFlip ? turn === 'b' : manualFlip;
@@ -218,12 +241,12 @@ export function Game({ config, online, onMenu, onRules }: Props) {
 
   const send = online?.send;
   const play = useCallback(
-    (m: Move) => {
+    (m: Move, meta: MoveMeta = {}) => {
       if (send) {
         // Online: the move goes to the shared game, and comes straight back through the sync above.
         send(m, !!adjudicate(applyMove(cur, m).state));
       } else {
-        setHist((h) => [...h, makeEntry(h[h.length - 1].state, m)]);
+        setHist((h) => [...h, makeEntry(h[h.length - 1].state, m, meta)]);
       }
       if (config.clock && !send) {
         const mover = sideToMove(cur);
@@ -272,33 +295,79 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     return () => w.terminate();
   }, []);
 
+  /** Asks the built-in engine (in its worker) for a move. */
+  const engineMove = useCallback((state: GameState, level: BotLevel, pace: number, my: number) => {
+    return new Promise<Move | null>((resolve) => {
+      const w = worker.current;
+      if (!w) return resolve(null);
+      const onMsg = (e: MessageEvent<{ move: Move | null; token: number }>) => {
+        if (e.data.token !== my) return;
+        w.removeEventListener('message', onMsg);
+        resolve(e.data.move);
+      };
+      w.addEventListener('message', onMsg);
+      w.postMessage({ state, level, pace, token: my });
+    });
+  }, []);
+
+  const histRef = useRef(hist);
   useEffect(() => {
-    if (!botTurn || !worker.current) return;
+    histRef.current = hist;
+  }, [hist]);
+
+  // Whenever it's a machine's turn (built-in bot or connected AI), ask it for a move.
+  useEffect(() => {
+    if (!botTurn || !seat || paused || aiError) return;
     const my = ++token.current;
-    const w = worker.current;
+    const ctrl = new AbortController();
     setThinking(true);
     const started = Date.now();
-    const onMsg = (e: MessageEvent<{ move: Move | null; token: number }>) => {
-      if (e.data.token !== my) return;
-      // A short pause so instant replies don't feel like a glitch.
-      const wait = Math.max(0, 500 - (Date.now() - started));
-      setTimeout(() => {
-        if (token.current !== my) return;
-        setThinking(false);
-        if (e.data.move) play(e.data.move);
-      }, wait);
-    };
-    w.addEventListener('message', onMsg);
-    // On a clock, the bot never spends more than a slice of its remaining time.
-    const left = clockRef.current[sideToMove(cur)];
-    const pace = config.clock ? Math.min(settings.botPace, Math.max(0.1, left / 60_000 / 4)) : settings.botPace;
-    w.postMessage({ state: cur, level: config.level, pace, token: my });
+    // A short pause so instant replies don't feel like a glitch; a longer one when two AIs play,
+    // so you can follow the game.
+    const minWait = aiVsAi ? 900 : 500;
+    (async () => {
+      let move: Move | null;
+      let meta: MoveMeta = {};
+      if (seat.provider === 'builtin') {
+        // On a clock, the bot never spends more than a slice of its remaining time.
+        const left = clockRef.current[sideToMove(cur)];
+        const pace = config.clock ? Math.min(settings.botPace, Math.max(0.1, left / 60_000 / 4)) : settings.botPace;
+        move = await engineMove(cur, builtinLevel(seat), pace, my);
+      } else {
+        const { aiChooseMove } = await import('../ai/runner');
+        const history = histRef.current.slice(1).map((e) => e.notation ?? '');
+        const r = await aiChooseMove(cur, seat, history, ctrl.signal);
+        move = r.move;
+        meta = { comment: r.comment, note: r.note };
+      }
+      if (token.current !== my) return;
+      await new Promise((r) => setTimeout(r, Math.max(0, minWait - (Date.now() - started))));
+      if (token.current !== my) return;
+      setThinking(false);
+      if (move) play(move, meta);
+    })().catch((e: Error) => {
+      if (ctrl.signal.aborted || token.current !== my) return;
+      setThinking(false);
+      setAiError(`${playerName(seat)} couldn't move: ${e.message}`);
+    });
     return () => {
-      w.removeEventListener('message', onMsg);
+      ctrl.abort();
       token.current++;
       setThinking(false);
     };
-  }, [botTurn, cur, config.level, config.clock, play, settings.botPace]);
+  }, [botTurn, seat, paused, aiError, aiVsAi, cur, config.clock, play, settings.botPace, engineMove]);
+
+  /** After an AI error: let the built-in bot make this one move instead. */
+  const substitute = async () => {
+    if (!seat) return;
+    const my = ++token.current;
+    setThinking(true);
+    const move = await engineMove(cur, 'medium', 1, my);
+    if (token.current !== my) return;
+    setThinking(false);
+    setAiError(null);
+    if (move) play(move, { note: `The built-in bot moved for ${playerName(seat)}` });
+  };
 
   // --- Input ---------------------------------------------------------------
   const choose = (moves: Move[]) => {
@@ -408,8 +477,8 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     setHist((h) => {
       if (h.length <= 1) return h;
       let n = h.length - 1;
-      // Against the bot, rewind to your own turn.
-      if (config.mode === 'bot') while (n > 1 && sideToMove(h[n - 1].state) !== config.human) n--;
+      // Against a bot or AI, rewind to your own turn.
+      if (humanColor) while (n > 1 && sideToMove(h[n - 1].state) !== humanColor) n--;
       return h.slice(0, n);
     });
     clearSelection();
@@ -432,6 +501,10 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     if (online) {
       const name = online.game.names[c] || (online.game[c === 'w' ? 'white' : 'black'] ? colorName(c) : 'Waiting for a friend…');
       return online.me === c ? `${name} (you)` : name;
+    }
+    if (config.mode === 'ai') {
+      const p = config.ai?.[c];
+      return p ? playerName(p) : 'You';
     }
     return config.mode === 'local' ? colorName(c) : c === config.human ? 'You' : `Bot · ${config.level}`;
   };
@@ -457,7 +530,11 @@ export function Game({ config, online, onMenu, onRules }: Props) {
       <div className="result-card">
         <h2>
           {result.winner
-            ? config.mode === 'bot' || (online && online.me)
+            ? config.mode === 'ai'
+              ? result.winner === humanColor
+                ? 'You win!'
+                : `${players(result.winner)} wins`
+              : config.mode === 'bot' || (online && online.me)
               ? result.winner === config.human
                 ? 'You win!'
                 : online
@@ -672,7 +749,19 @@ export function Game({ config, online, onMenu, onRules }: Props) {
               {config.clock ? (
                 <span className={`clock${turn === c && !result && hist.length > 1 ? ' running' : ''}${shownClock[c] < 20_000 ? ' low' : ''}`}>{fmtClock(shownClock[c])}</span>
               ) : (
-                turn === c && !result && <span className="pstate">{thinking && botTurn ? 'thinking…' : 'to move'}</span>
+                turn === c && !result && (
+                  <span className="pstate">
+                    {thinking && botTurn ? (
+                      <>
+                        thinking <ThinkingTimer key={hist.length} />
+                      </>
+                    ) : paused && botTurn ? (
+                      'paused'
+                    ) : (
+                      'to move'
+                    )}
+                  </span>
+                )
               )}
             </div>
           ))}
@@ -705,6 +794,26 @@ export function Game({ config, online, onMenu, onRules }: Props) {
           </div>
         )}
 
+        {aiError && !result && (
+          <div className="card alert ai-error">
+            <strong>The AI got stuck</strong>
+            <span>{aiError}</span>
+            <div className="row">
+              <button className="primary" onClick={() => setAiError(null)}>Try again</button>
+              <button onClick={substitute}>Let the built-in bot move</button>
+            </div>
+          </div>
+        )}
+        {aiVsAi && !result && (
+          <div className="card ai-control">
+            <span>
+              {paused ? 'Paused.' : thinking ? `${players(turn)} is thinking…` : 'Playing…'}
+              {thinking && !paused && <ThinkingTimer key={hist.length} />}
+            </span>
+            <button onClick={() => setPaused((v) => !v)}>{paused ? 'Resume' : 'Pause'}</button>
+          </div>
+        )}
+
         {checkInfo && !result && (
           <div className="card alert">
             <strong>{colorName(turn)} is in check</strong>
@@ -723,7 +832,7 @@ export function Game({ config, online, onMenu, onRules }: Props) {
           {online ? (
             <button onClick={online.offerDraw} disabled={!online.me || !!result || waiting || !!online.game.drawOffer}>Draw?</button>
           ) : (
-            <button onClick={undo} disabled={hist.length <= 1 || thinking || !!config.clock} title={config.clock ? 'No undo in timed games' : undefined}>
+            <button onClick={undo} disabled={hist.length <= 1 || thinking || !!config.clock || aiVsAi} title={config.clock ? 'No undo in timed games' : undefined}>
               Undo
             </button>
           )}
@@ -752,6 +861,18 @@ export function Game({ config, online, onMenu, onRules }: Props) {
       </aside>
     </div>
   );
+}
+
+/** Seconds since the machine started thinking (AIs can take a while). */
+function ThinkingTimer() {
+  const [start] = useState(() => Date.now());
+  const [now, setNow] = useState(start);
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const s = Math.floor((now - start) / 1000);
+  return s >= 2 ? <span className="think-timer">{s}s</span> : null;
 }
 
 function fmtClock(ms: number) {
@@ -797,8 +918,8 @@ function SelectedCard({ selected, reach, canAct, result, cur, view }: SelectedPr
           </>
         ) : (
           <>
-            <strong>Bot is thinking…</strong>
-            <span>Its move will be highlighted on the board and described below.</span>
+            <strong>Waiting for the other side…</strong>
+            <span>Its move will be highlighted on the board and described below, with its reasoning if it's an AI.</span>
           </>
         )}
       </div>
@@ -892,6 +1013,8 @@ function MoveLog({ hist, levels }: { hist: Entry[]; levels: number }) {
                     <code>{e.notation}</code>
                     {shift !== 0 && <span className={`shift ${era(shift)}`}>{rel(shift)}</span>}
                   </span>
+                  {e.comment && <span className="ai-comment">💬 “{e.comment}”</span>}
+                  {e.note && <span className="ai-note">{e.note}</span>}
                   {e.events.map((ev, j) => (
                     <span key={j} className={`ev ${ev.kind}`}>
                       {ev.kind === 'arrived'

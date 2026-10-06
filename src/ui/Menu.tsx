@@ -4,6 +4,8 @@ import { STANDARD_RULES } from '../engine/game';
 import type { Color, Rules } from '../engine/types';
 import { HouseRules, rulesSummary } from './HouseRules';
 import { Pc } from './Pc';
+import { AiSlot } from './AiSlot';
+import { loadSaved, saveSaved, slotPlayer, type AiPlayer, type SavedAi, type SlotId } from '../ai/types';
 import { loadHouseRules, saveHouseRules } from './settings';
 import { onlineAvailable, savedName, saveName } from '../online/config';
 import type { NewGame } from '../online/session';
@@ -17,12 +19,14 @@ export interface Clock {
 
 export interface GameConfig {
   variant: Variant;
-  mode: 'bot' | 'local' | 'online';
+  mode: 'bot' | 'local' | 'online' | 'ai';
   human: Color;
   level: BotLevel;
   rules: Rules;
   house: boolean;
   clock: Clock | null;
+  /** mode 'ai': who plays each side (null = a human at this screen) */
+  ai?: { w: AiPlayer | null; b: AiPlayer | null };
 }
 
 interface Props {
@@ -48,7 +52,9 @@ const CLOCKS: { label: string; clock: Clock | null }[] = [
 
 interface MenuPrefs {
   variant: Variant;
-  mode: 'bot' | 'local' | 'online';
+  mode: 'bot' | 'local' | 'online' | 'ai';
+  /** AI mode: you vs an AI, or two AIs against each other */
+  aiMatch: 'you' | 'watch';
   color: Color | 'random';
   level: BotLevel;
   clock: number;
@@ -56,7 +62,7 @@ interface MenuPrefs {
 }
 
 const PREFS_KEY = '4d-chess.menu';
-const DEFAULT_PREFS: MenuPrefs = { variant: 'time', mode: 'bot', color: 'w', level: 'medium', clock: 0, house: false };
+const DEFAULT_PREFS: MenuPrefs = { variant: 'time', mode: 'bot', aiMatch: 'you', color: 'w', level: 'medium', clock: 0, house: false };
 
 function loadPrefs(): MenuPrefs {
   try {
@@ -71,6 +77,16 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
   const [name, setName] = useState(savedName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [ai, setAi] = useState<SavedAi>(loadSaved);
+  const slot = (id: SlotId) => slotPlayer(ai, id, id === 'w' ? 'builtin' : 'claude');
+  const setSlot = (id: SlotId, p: AiPlayer) => {
+    setAi((old) => {
+      const { apiKey, ...rest } = p;
+      const next: SavedAi = { ...old, slots: { ...old.slots, [id]: rest }, keys: apiKey !== undefined ? { ...old.keys, [p.provider]: apiKey } : old.keys };
+      saveSaved(next);
+      return next;
+    });
+  };
   const [house, setHouse] = useState<Rules>(loadHouseRules);
   const [editing, setEditing] = useState(false);
   const set = (p: Partial<MenuPrefs>) => setPrefs((old) => ({ ...old, ...p }));
@@ -104,10 +120,20 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
       }
       return;
     }
+    let aiSeats: GameConfig['ai'];
+    if (prefs.mode === 'ai') {
+      aiSeats = prefs.aiMatch === 'watch' ? { w: slot('w'), b: slot('b') } : human === 'w' ? { w: null, b: slot('opp') } : { w: slot('opp'), b: null };
+      const missing = Object.values(aiSeats).find((p) => p && p.provider !== 'builtin' && ((['claude', 'openai', 'gemini', 'openrouter'].includes(p.provider) && !p.apiKey) || (['local', 'custom'].includes(p.provider) && !p.baseUrl)));
+      if (missing) {
+        setError('An AI player is missing its API key or URL.');
+        return;
+      }
+    }
     onStart({
       variant: prefs.variant,
       mode: prefs.mode,
-      human: prefs.mode === 'local' ? 'w' : human,
+      ai: aiSeats,
+      human: prefs.mode === 'local' || (prefs.mode === 'ai' && prefs.aiMatch === 'watch') ? 'w' : human,
       level: prefs.level,
       rules: prefs.house ? house : STANDARD_RULES,
       house: prefs.house,
@@ -165,6 +191,7 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
           <span className="field-label">Opponent</span>
           <div className="seg">
             <button className={prefs.mode === 'bot' ? 'on' : ''} onClick={() => set({ mode: 'bot' })}>Bot</button>
+            <button className={prefs.mode === 'ai' ? 'on' : ''} onClick={() => set({ mode: 'ai' })} title="Play an AI of your choice, or watch two AIs play">AI</button>
             <button className={prefs.mode === 'local' ? 'on' : ''} onClick={() => set({ mode: 'local' })}>Pass &amp; play</button>
             <button
               className={prefs.mode === 'online' ? 'on' : ''}
@@ -184,7 +211,47 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
           </div>
         )}
 
-        {prefs.mode !== 'local' && (
+        {prefs.mode === 'ai' && (
+          <>
+            <div className="setup-row">
+              <span className="field-label">Match</span>
+              <div className="seg">
+                <button className={prefs.aiMatch === 'you' ? 'on' : ''} onClick={() => set({ aiMatch: 'you' })}>You vs AI</button>
+                <button className={prefs.aiMatch === 'watch' ? 'on' : ''} onClick={() => set({ aiMatch: 'watch' })}>AI vs AI</button>
+              </div>
+            </div>
+            <div className={`ai-slots${prefs.aiMatch === 'watch' ? ' two' : ''}`}>
+              {prefs.aiMatch === 'watch' ? (
+                <>
+                  <AiSlot title="White" value={slot('w')} keys={ai.keys} variant={prefs.variant} onChange={(p) => setSlot('w', p)} />
+                  <AiSlot title="Black" value={slot('b')} keys={ai.keys} variant={prefs.variant} onChange={(p) => setSlot('b', p)} />
+                </>
+              ) : (
+                <AiSlot title="Your opponent" value={slot('opp')} keys={ai.keys} variant={prefs.variant} onChange={(p) => setSlot('opp', p)} />
+              )}
+            </div>
+            <div className="ai-privacy">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={ai.remember}
+                  onChange={(e) => setAi((old) => {
+                    const next = { ...old, remember: e.target.checked };
+                    saveSaved(next);
+                    return next;
+                  })}
+                />{' '}
+                Remember API keys on this device
+              </label>
+              <span>
+                Keys stay in your browser and are sent only to the AI provider you choose, never to this site's server. Each AI move is one request billed to your
+                key.
+              </span>
+            </div>
+          </>
+        )}
+
+        {prefs.mode !== 'local' && !(prefs.mode === 'ai' && prefs.aiMatch === 'watch') && (
           <>
             <div className="setup-row">
               <span className="field-label">Play as</span>

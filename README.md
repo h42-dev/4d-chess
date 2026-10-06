@@ -66,6 +66,58 @@ off, drop the horizon, allow passing and change the draw rule.
   and high-contrast), coordinates, animations, move hints, sounds, bot thinking time, turning the board for pass & play.
 - **Menu:** game, opponent, clock (3+2, 5+3, 10+5, 30+0) and house rules.
 
+## AI players
+
+Pick **AI** in the menu to play an AI of your choice (**You vs AI**) or to watch two AIs play each other
+(**AI vs AI**, with pause/resume). Each side can be:
+
+| Player | What you need |
+| --- | --- |
+| Built-in bot | Nothing (easy / medium / hard) |
+| Claude (Anthropic) | An Anthropic API key. Default model `claude-opus-5-5`; also Sonnet 5.5, Haiku 4.5, Fable 5.1. "Thinking" sets the effort. |
+| ChatGPT (OpenAI) | An OpenAI API key and any model id your key can use |
+| Gemini (Google) | A Google AI Studio key and a model id |
+| OpenRouter | One key for hundreds of models (use the id from openrouter.ai/models) |
+| Local model | An OpenAI-compatible server such as Ollama (`http://localhost:11434/v1`) or LM Studio. Ollama needs `OLLAMA_ORIGINS` to include this site's address. |
+| Your own bot | A URL that speaks the Bot API below |
+
+- **Keys stay in the browser.** They're sent only to the provider you pick, never to this site's server, and are
+  remembered on the device only if "Remember API keys" is ticked. Each AI move is one request billed to your key.
+- Language models get the rules, an ASCII picture of every level, the pieces away from the present, recent
+  moves and the full list of legal moves, and must answer `{"move", "comment"}` JSON. Their comment shows in the
+  move log. An illegal answer gets one retry with feedback. If it fails again (or the API errors), the game
+  pauses and offers **Try again** or **Let the built-in bot move**.
+- Claude uses the official Anthropic SDK (loaded only when a Claude player is in the game) with structured outputs
+  and server-side refusal fallbacks (`fallbacks: "default"`).
+- **Test connection** in the menu makes one request to check the key/URL/model before you start.
+
+### Bot API (your own bot)
+
+The game `POST`s JSON to your URL on each of your bot's turns:
+
+```json
+{
+  "protocol": "4d-chess-bot/1",
+  "variant": "time",            // or "4d"
+  "you": "white",
+  "turn": 12,
+  "position": "…the same text description language models get…",
+  "legalMoves": ["e2→e4", "Ng1→f3[t+2]", "Qd1×d7[t−1]", "…"],
+  "history": ["e2→e4", "d7→d5[t+1]", "…"],
+  "state": { "…": "the full engine state, if you want to compute yourself" }
+}
+```
+
+Reply with one of the legal moves (or its index), plus an optional comment:
+
+```json
+{ "move": "Ng1→f3[t+2]", "comment": "Developing into the future." }
+{ "index": 17 }
+```
+
+Your server must allow cross-origin requests (send `Access-Control-Allow-Origin: *` and answer `OPTIONS`).
+A local bot at `http://localhost:…` works from the live site in Chrome.
+
 ## Online play
 
 Pick **Online** in the menu. You get a link (`?game=CODE`) to send a friend, and the game starts when they open it.
@@ -97,6 +149,7 @@ and the project's Firestore database; Pay to Win only uses the Realtime Database
 
 - `src/engine/game.ts`: rules engine (move generation, time travel, arrivals, check, notation)
 - `src/engine/bot.ts`: alpha-beta bot; runs in a Web Worker (`bot.worker.ts`)
+- `src/ai/`: AI players: prompt + move matching, Claude (Anthropic SDK), OpenAI-compatible, Gemini and Bot API adapters
 - `src/ui/`: React UI: board with split time squares, level map (4D), time ribbon, "when?" picker,
   3D stack view, menu, house rules editor, settings
 
