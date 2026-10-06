@@ -74,6 +74,9 @@ export function Board(props: Props) {
       if (lastMove && (lastMove.from === sq || lastMove.to === sq)) classes.push('last');
       if (lastCapture && lastMove?.to === sq) classes.push('took');
       if (opts && hints) classes.push('target');
+      // Viewing another time: show where the selected piece is moving from.
+      const origin = selected && focus !== null && selected.dt !== focus && selected.sq === sq;
+      if (origin) classes.push('origin');
 
       type Slot = { piece: Piece; ghost?: boolean };
       let slots: Slot[] = here.map((piece) => ({ piece }));
@@ -108,6 +111,12 @@ export function Board(props: Props) {
           {coords && col === 0 && <span className="coord rank">{((sq >> 3) & 7) + 1}</span>}
           {coords && row === 7 && <span className="coord file">{'abcdefgh'[sq & 7]}</span>}
           {background}
+          {origin && (
+            <span className={`origin-mark ${era(selected.dt)}`} title={`Your ${NAME[selected.type].toLowerCase()} is moving from here (${relWords(selected.dt)})`}>
+              <Pc type={selected.type} color={selected.color} />
+              <small>{rel(selected.dt)}</small>
+            </span>
+          )}
           {n > 0 && (
             <div className={`slots n${Math.min(n, 4)}${focus !== null ? ' moment' : ''}`}>
               {slots.map(({ piece: p, ghost: isGhost }) => {

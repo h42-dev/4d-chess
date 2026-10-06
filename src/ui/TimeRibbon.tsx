@@ -92,7 +92,7 @@ export function TimeRibbon({ state, focus, selected, reach, hoverId, onHover, on
         <span className="mid">
           {selected
             ? `Shaded: how far this ${NAME[selected.type].toLowerCase()} can travel. Numbers are moves into each time.`
-            : 'Pieces away from the present appear in their time. Click a time to see the board then.'}
+            : 'Pieces away from the present appear in their time. Click a time to see the board then and move into it.'}
         </span>
         <span className="future">Future ▸</span>
       </div>

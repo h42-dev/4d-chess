@@ -222,6 +222,17 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     }
     return map;
   }, [bySq, focus]);
+  /** Viewing another time: your pieces (from any time) that can move into it, with their move counts. */
+  const movers = useMemo(() => {
+    if (focus === null || !canAct) return [];
+    const count = new Map<number, number>();
+    for (const m of legal) if (m.toDt === focus && (!m.promo || m.promo === 'q')) count.set(m.pid, (count.get(m.pid) ?? 0) + 1);
+    const value: Record<string, number> = { k: 0, q: 1, r: 2, b: 3, n: 4, p: 5 };
+    return cur.pieces
+      .filter((p) => count.has(p.id) && p.dt !== focus)
+      .sort((a, b) => value[a.type] - value[b.type] || a.sq - b.sq)
+      .map((p) => ({ p, n: count.get(p.id)! }));
+  }, [legal, focus, canAct, cur.pieces]);
   const reach = useMemo(() => {
     const r = new Map<number, number>();
     for (const m of selMoves) if (!m.promo || m.promo === 'q') r.set(m.toDt, (r.get(m.toDt) ?? 0) + 1);
@@ -414,11 +425,12 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     return true;
   };
 
-  const select = (p: Piece) => {
+  /** `keepTime`: stay on the time being viewed (picking a piece to move into it). */
+  const select = (p: Piece, keepTime = false) => {
     setSelId(p.id);
     setWhy(null);
     clearPickerOnly();
-    if (focus !== null && p.dt !== focus) setFocus(null);
+    if (!keepTime && focus !== null && p.dt !== focus) setFocus(null);
     if (is4d) setLevel(levelOf(p.sq));
   };
 
@@ -688,6 +700,28 @@ export function Game({ config, online, onMenu, onRules }: Props) {
               </span>
             </div>
             <button onClick={() => setFocus(null)}>Show all times</button>
+            {canAct && focus !== 0 && (
+              <div className="movers">
+                <span className="movers-label">
+                  {movers.length ? (selected && selected.dt !== focus ? 'Click a dot on the board to land there, or pick another piece:' : `Pick a piece to move into T=${cur.ply + focus}:`) : `None of your pieces can move into T=${cur.ply + focus} right now.`}
+                </span>
+                {movers.map(({ p, n }) => (
+                  <button
+                    key={p.id}
+                    className={`mover ${era(p.dt)}${selected?.id === p.id ? ' on' : ''}`}
+                    onClick={() => (selected?.id === p.id ? clearSelection() : select(p, true))}
+                    onMouseEnter={() => setHoverId(p.id)}
+                    onMouseLeave={() => setHoverId(null)}
+                    title={`${NAME[p.type]} on ${sqName(p.sq, cur.levels)}, ${relWords(p.dt)}: ${n} move${n === 1 ? '' : 's'} into this time`}
+                  >
+                    <Pc type={p.type} color={p.color} />
+                    <span>{sqName(p.sq, cur.levels)}</span>
+                    {p.dt !== 0 && <small>{rel(p.dt)}</small>}
+                    <b>{n}</b>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 

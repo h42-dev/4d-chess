@@ -249,7 +249,22 @@ nav.top {
 .moment-banner.past strong { color: var(--past-hi); }
 .moment-banner.future { border-color: var(--future); background: linear-gradient(90deg, color-mix(in srgb, var(--future) 20%, transparent), var(--panel)); }
 .moment-banner.future strong { color: var(--future-hi); }
-.moment-banner button { flex: 0 0 auto; font-weight: 600; }
+.moment-banner { flex-wrap: wrap; }
+.moment-banner > button { flex: 0 0 auto; font-weight: 600; }
+.moment-banner > .movers { flex: 1 0 100%; display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.movers-label { color: var(--text); font-weight: 600; margin-right: 2px; }
+.mover { display: inline-flex; align-items: center; gap: 5px; padding: 3px 9px 3px 5px; border-radius: 999px; font-size: 12.5px; background: var(--panel-2); border: 1px solid var(--line); }
+.mover .piece { font-size: 20px; line-height: 1; }
+.mover small { color: var(--muted); }
+.mover.past small { color: var(--past-hi); }
+.mover.future small { color: var(--future-hi); }
+.mover b { min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--now); color: #1b1407; font-size: 11px; text-align: center; }
+.mover:hover { border-color: var(--now); }
+.mover.on { border-color: var(--now); background: color-mix(in srgb, var(--now) 22%, var(--panel-2)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--now) 40%, transparent); }
+.sq.origin { box-shadow: inset 0 0 0 0.5cqw var(--now); }
+.origin-mark { position: absolute; inset: 8%; display: grid; place-items: center; border: 0.35cqw dashed var(--now); border-radius: 18%; opacity: 0.85; pointer-events: none; }
+.origin-mark .piece { font-size: 6.5cqw; opacity: 0.55; }
+.origin-mark small { position: absolute; top: 2%; right: 6%; font-size: 1.6cqw; font-weight: 700; color: var(--now); }
 
 /* ---------- Board ---------- */
 .board {
