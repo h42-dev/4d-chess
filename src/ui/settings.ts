@@ -59,7 +59,7 @@ export const saveSettings = (s: Settings) => write(SETTINGS_KEY, s);
 
 export function loadHouseRules(): Rules {
   const r = read<Rules>(HOUSE_KEY, STANDARD_RULES);
-  return { ...r, ttl: { ...STANDARD_RULES.ttl, ...r.ttl } };
+  return { ...STANDARD_RULES, ...r, ttl: { ...STANDARD_RULES.ttl, ...r.ttl } };
 }
 export const saveHouseRules = (r: Rules) => write(HOUSE_KEY, r);
 

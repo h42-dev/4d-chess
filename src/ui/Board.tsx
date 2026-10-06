@@ -50,7 +50,9 @@ export function Board(props: Props) {
   const echoes = new Map<number, Piece>();
   if (focus !== null && focus > 0) for (const p of state.pieces) if (p.dt === 0) echoes.set(p.sq, p);
   const victims = new Set<number>();
-  for (const ms of targets.values()) for (const m of ms) if (m.capture !== undefined) victims.add(m.capture);
+  // Erasing a past piece targets its past self, not the copy on the board now.
+  for (const ms of targets.values()) for (const m of ms) if (m.capture !== undefined && m.erase === undefined) victims.add(m.capture);
+  const living = state.rules.history === 'living';
 
   const cells: ReactNode[] = [];
   for (let row = 0; row < 8; row++) {
@@ -60,6 +62,7 @@ export function Board(props: Props) {
       const here = [...(bySq.get(sq) ?? [])];
       const opts = targets.get(sq);
       const quiet = opts?.filter((m) => m.capture === undefined) ?? [];
+      const erases = opts?.filter((m) => m.erase !== undefined) ?? [];
 
       // While choosing a time, show the moving piece where it would land.
       let ghost: { piece: Piece; dt: number } | null = null;
@@ -85,7 +88,16 @@ export function Board(props: Props) {
       let background: ReactNode = null;
       if (n === 0 && history) {
         const h = fromChar(history[sq]);
-        if (h) background = <span className="bg-piece history" title="History: this square was taken back then. It blocks landing but can't be captured."><Pc type={h.type} color={h.color} /></span>;
+        if (h)
+          background = living ? (
+            <span className={`bg-piece history living${erases.length ? ' erasable' : ''}`} title="This piece stood here at that moment. Capture it to erase it from history.">
+              <Pc type={h.type} color={h.color} />
+            </span>
+          ) : (
+            <span className="bg-piece history" title="History: this square was taken back then. It blocks landing but can't be captured.">
+              <Pc type={h.type} color={h.color} />
+            </span>
+          );
       } else if (n === 0 && echoes.has(sq)) {
         const e = echoes.get(sq)!;
         background = <span className="bg-piece echo" title="Standing here in the present right now"><Pc type={e.type} color={e.color} /></span>;
@@ -127,6 +139,19 @@ export function Board(props: Props) {
                 );
               })}
             </div>
+          )}
+          {hints && erases.length > 0 && quiet.length === 0 && !ghost && focus === null && (
+            // OG rules: a piece's past self can be captured here, in another time.
+            <button
+              className={`dot erase${n > 0 ? ' corner' : ''}`}
+              title="Capture a past piece here, erasing it from history"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSquare(sq);
+              }}
+            >
+              ×
+            </button>
           )}
           {hints && quiet.length > 0 && !ghost && (
             n > 0 ? (

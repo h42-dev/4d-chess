@@ -3,6 +3,7 @@ import type { Color } from '../engine/types';
 import { Game, type OnlineCtl } from '../ui/Game';
 import type { GameConfig } from '../ui/Menu';
 import { isStandard } from '../ui/settings';
+import { SIMPLE_RULES } from '../engine/game';
 import { savedName } from './config';
 import { declineDraw, joinGame, offerDraw, rematch, sendMove, setResult, shareLink, watchGame, type OnlineGame } from './session';
 
@@ -44,7 +45,7 @@ export function OnlineRoom({ code, onLeave, onOpen, onRules }: Props) {
             human: me ?? 'w',
             level: 'medium',
             rules: game.rules,
-            house: !isStandard(game.rules),
+            house: !isStandard(game.rules) && JSON.stringify(game.rules) !== JSON.stringify(SIMPLE_RULES),
             clock: game.clock,
           }
         : null,

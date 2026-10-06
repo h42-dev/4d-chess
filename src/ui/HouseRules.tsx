@@ -1,4 +1,4 @@
-import { STANDARD_RULES } from '../engine/game';
+import { SIMPLE_RULES, STANDARD_RULES } from '../engine/game';
 import type { PieceType, Rules } from '../engine/types';
 import { NAME } from './pieces';
 import { Pc } from './Pc';
@@ -9,7 +9,7 @@ const mapTtl = (f: (t: PieceType, v: { back: number; fwd: number }) => { back: n
   Object.fromEntries(ORDER.map((t) => [t, f(t, STANDARD_RULES.ttl[t])])) as Rules['ttl'];
 
 const PRESETS: { name: string; note: string; rules: Rules }[] = [
-  { name: 'Standard', note: 'The normal rules', rules: STANDARD_RULES },
+  { name: 'Realistic (OG rules)', note: 'The standard rules: living history', rules: STANDARD_RULES },
   {
     name: 'Wild time',
     note: 'Every limit doubled',
@@ -26,6 +26,7 @@ const PRESETS: { name: string; note: string; rules: Rules }[] = [
     rules: { ...STANDARD_RULES, ttl: mapTtl(() => ({ back: 4, fwd: 4 })) },
   },
   { name: 'No time travel', note: 'Plain chess (or plain 3D chess)', rules: { ...STANDARD_RULES, timeTravel: false } },
+  { name: 'Simple', note: 'The past can be seen but not touched', rules: SIMPLE_RULES },
 ];
 
 const DRAWS = [0, 50, 100, 150, 200, 300];
@@ -103,6 +104,12 @@ export function HouseRules({ value, onChange }: { value: Rules; onChange: (r: Ru
       </div>
 
       <Toggle
+        on={value.history === 'living'}
+        onChange={(v) => onChange({ ...value, history: v ? 'living' : 'snapshot' })}
+        title="Living history (Realistic / OG rules)"
+        note="Past boards are real: capturing there erases the piece from history and replays every move since"
+      />
+      <Toggle
         on={value.horizon}
         onChange={(v) => onChange({ ...value, horizon: v })}
         title="Limits are also a horizon"
@@ -139,6 +146,7 @@ export function HouseRules({ value, onChange }: { value: Rules; onChange: (r: Ru
 export function rulesSummary(r: Rules): string {
   const bits: string[] = [];
   if (!r.timeTravel) bits.push('no time travel');
+  if (r.timeTravel && r.history === 'snapshot') bits.push('simple history (past can’t be touched)');
   else {
     const changed = ORDER.filter((t) => r.ttl[t].back !== STANDARD_RULES.ttl[t].back || r.ttl[t].fwd !== STANDARD_RULES.ttl[t].fwd);
     if (changed.length === ORDER.length) bits.push('custom time limits for every piece');

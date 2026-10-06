@@ -12,6 +12,7 @@ import { play as sfx } from './sound';
 import { RIBBON_FUTURE, TimeRibbon } from './TimeRibbon';
 import { TimePicker } from './TimePicker';
 import { TimeStack } from './TimeStack';
+import { whyNoCapture } from './explain';
 import type { OnlineGame } from '../online/session';
 import { builtinLevel, playerName, type AiPlayer } from '../ai/types';
 import type { BotLevel } from '../engine/bot';
@@ -95,6 +96,8 @@ export function Game({ config, online, onMenu, onRules }: Props) {
   const [manualFlip, setManualFlip] = useState((config.mode === 'bot' || config.mode === 'online' || config.mode === 'ai') && config.human === 'b');
   const [paused, setPaused] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  /** why the last enemy piece you clicked couldn't be captured */
+  const [why, setWhy] = useState<string | null>(null);
   const [promo, setPromo] = useState<Move[] | null>(null);
   const [picker, setPicker] = useState<{ sq: number; other: Piece | null; floating?: boolean } | null>(null);
   const [previewDt, setPreviewDt] = useState<number | null>(null);
@@ -236,6 +239,7 @@ export function Game({ config, online, onMenu, onRules }: Props) {
 
   const clearSelection = () => {
     setSelId(null);
+    setWhy(null);
     clearPickerOnly();
   };
 
@@ -253,6 +257,7 @@ export function Game({ config, online, onMenu, onRules }: Props) {
         setClock((c) => ({ ...c, [mover]: c[mover] + config.clock!.increment * 1000 }));
       }
       setSelId(null);
+      setWhy(null);
       setPromo(null);
       setPicker(null);
       setPreviewDt(null);
@@ -389,6 +394,7 @@ export function Game({ config, online, onMenu, onRules }: Props) {
 
   const select = (p: Piece) => {
     setSelId(p.id);
+    setWhy(null);
     clearPickerOnly();
     if (focus !== null && p.dt !== focus) setFocus(null);
     if (is4d) setLevel(levelOf(p.sq));
@@ -415,7 +421,12 @@ export function Game({ config, online, onMenu, onRules }: Props) {
       // Your own piece on a square the selected piece can reach in another time: ask, with
       // "select this piece instead" as the first choice.
       if (p.color === turn && optionsAt(p.sq).length) return void goTo(p.sq, p);
-      if (p.color !== turn && goTo(p.sq)) return;
+      if (p.color !== turn) {
+        // Can't take it: say why, and still offer any moves onto that square in other times.
+        setWhy(whyNoCapture(cur, selected, p));
+        goTo(p.sq);
+        return;
+      }
     }
     if (p.color === turn) select(p);
     else clearSelection();
@@ -635,7 +646,9 @@ export function Game({ config, online, onMenu, onRules }: Props) {
               <strong>{focus === 0 ? 'The present only' : `The board ${relWords(focus)}`}</strong>
               <span>
                 {focus < 0
-                  ? `T=${cur.ply + focus}. Grey pieces are history: they stood here then, so you can't land there, but they can't be captured.`
+                  ? cur.rules.history === 'living'
+                    ? `T=${cur.ply + focus}. This is the real board from then. Capture a piece here and it's erased from history from T=${cur.ply + focus} on, and every move since is replayed without it.`
+                    : `T=${cur.ply + focus}. Grey pieces are history: they stood here then, so you can't land there, but they can't be captured.`
                   : focus > 0
                     ? `T=${cur.ply + focus}. Faint pieces are in the present now. If they're still there when this time arrives, pieces landing on them are lost.`
                     : 'Only the pieces in the present are shown.'}
@@ -744,7 +757,7 @@ export function Game({ config, online, onMenu, onRules }: Props) {
                   {players(c)}
                   {turn === c && !result && config.clock && <span className="pstate inline">{thinking && botTurn ? ' · thinking…' : ' · to move'}</span>}
                 </span>
-                <Taken hist={hist} color={c} />
+                <Taken state={cur} color={c} />
               </div>
               {config.clock ? (
                 <span className={`clock${turn === c && !result && hist.length > 1 ? ' running' : ''}${shownClock[c] < 20_000 ? ' low' : ''}`}>{fmtClock(shownClock[c])}</span>
@@ -767,9 +780,10 @@ export function Game({ config, online, onMenu, onRules }: Props) {
           ))}
         </div>
 
-        {(config.house || is4d) && (
+        {(config.house || is4d || cur.rules.history === 'snapshot') && (
           <div className="mode-tags">
             <span className="tag">{is4d ? '4D Chess · 8×8×3' : 'Time Travel Chess'}</span>
+            {cur.rules.history === 'snapshot' && !config.house && <span className="tag og" title="The past can be seen but not touched">Simple rules</span>}
             {config.house && <span className="tag house" title={rulesSummary(config.rules)}>House rules: {rulesSummary(config.rules)}</span>}
           </div>
         )}
@@ -825,8 +839,14 @@ export function Game({ config, online, onMenu, onRules }: Props) {
         )}
 
         <SelectedCard selected={canAct ? selected : null} reach={reach} canAct={canAct} result={!!result} cur={cur} view={view} />
+        {why && canAct && selected && (
+          <div className="card why">
+            <strong>Why can't it take that?</strong>
+            <span>{why}</span>
+          </div>
+        )}
 
-        <MoveLog hist={hist} levels={cur.levels} />
+        <MoveLog hist={hist} levels={cur.levels} voided={cur.voided} />
 
         <div className="actions">
           {online ? (
@@ -969,13 +989,13 @@ function SelectedCard({ selected, reach, canAct, result, cur, view }: SelectedPr
   );
 }
 
-/** Pieces this colour has lost so far: captured, or destroyed when they arrived from the future. */
-function Taken({ hist, color }: { hist: Entry[]; color: Color }) {
-  const lost: Piece['type'][] = [];
-  for (const e of hist) {
-    if (e.captured?.color === color) lost.push(e.captured.type);
-    for (const ev of e.events) if (ev.kind === 'lost' && ev.color === color) lost.push(ev.type);
-  }
+/**
+ * Pieces this colour has lost so far: captured, lost in time or erased from history. Worked out
+ * from the starting pieces, so it stays right when (OG rules) history is rewritten.
+ */
+function Taken({ state, color }: { state: GameState; color: Color }) {
+  const alive = new Set(state.pieces.map((p) => p.id));
+  const lost = state.initial.filter((p) => p.color === color && !alive.has(p.id)).map((p) => p.type);
   if (!lost.length) return null;
   const order = 'qrbnpk';
   lost.sort((a, b) => order.indexOf(a) - order.indexOf(b));
@@ -988,7 +1008,7 @@ function Taken({ hist, color }: { hist: Entry[]; color: Color }) {
   );
 }
 
-function MoveLog({ hist, levels }: { hist: Entry[]; levels: number }) {
+function MoveLog({ hist, levels, voided }: { hist: Entry[]; levels: number; voided: number[] }) {
   const ref = useRef<HTMLOListElement>(null);
   useEffect(() => {
     ref.current?.scrollTo({ top: ref.current.scrollHeight, behavior: 'smooth' });
@@ -1004,7 +1024,7 @@ function MoveLog({ hist, levels }: { hist: Entry[]; levels: number }) {
           {rows.map((e, i) => {
             const shift = e.move ? e.move.toDt - e.move.fromDt : 0;
             return (
-              <li key={i} className={i === rows.length - 1 ? 'latest' : ''}>
+              <li key={i} className={`${i === rows.length - 1 ? 'latest' : ''}${voided.includes(i) ? ' voided' : ''}`}>
                 <span className="n">{i + 1}</span>
                 <span className={`dot ${e.by}`} />
                 <div className="mtext">
@@ -1013,13 +1033,18 @@ function MoveLog({ hist, levels }: { hist: Entry[]; levels: number }) {
                     <code>{e.notation}</code>
                     {shift !== 0 && <span className={`shift ${era(shift)}`}>{rel(shift)}</span>}
                   </span>
+                  {voided.includes(i) && <span className="ev voided-note">⌫ No longer happened: history was rewritten</span>}
                   {e.comment && <span className="ai-comment">💬 “{e.comment}”</span>}
                   {e.note && <span className="ai-note">{e.note}</span>}
                   {e.events.map((ev, j) => (
                     <span key={j} className={`ev ${ev.kind}`}>
                       {ev.kind === 'arrived'
                         ? `↧ ${colorName(ev.color)} ${NAME[ev.type].toLowerCase()} arrived from the future on ${sqName(ev.sq, levels)}`
-                        : `✕ ${colorName(ev.color)} ${NAME[ev.type].toLowerCase()} arrived on an occupied ${sqName(ev.sq, levels)} and was lost in time`}
+                        : ev.kind === 'returned'
+                          ? `↥ ${colorName(ev.color)} ${NAME[ev.type].toLowerCase()} was pulled back to the present on ${sqName(ev.sq, levels)}`
+                          : ev.kind === 'erased'
+                            ? `⌫ ${colorName(ev.color)} ${NAME[ev.type].toLowerCase()} was erased from history, and the game was replayed without it`
+                            : `✕ ${colorName(ev.color)} ${NAME[ev.type].toLowerCase()} landed on an occupied ${sqName(ev.sq, levels)} and was lost in time`}
                     </span>
                   ))}
                 </div>

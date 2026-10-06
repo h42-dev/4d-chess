@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { BotLevel } from '../engine/bot';
-import { STANDARD_RULES } from '../engine/game';
+import { SIMPLE_RULES, STANDARD_RULES } from '../engine/game';
 import type { Color, Rules } from '../engine/types';
 import { HouseRules, rulesSummary } from './HouseRules';
 import { Pc } from './Pc';
@@ -59,10 +59,12 @@ interface MenuPrefs {
   level: BotLevel;
   clock: number;
   house: boolean;
+  /** the Simple rules instead of the standard Realistic (OG) rules */
+  simple: boolean;
 }
 
 const PREFS_KEY = '4d-chess.menu';
-const DEFAULT_PREFS: MenuPrefs = { variant: 'time', mode: 'bot', aiMatch: 'you', color: 'w', level: 'medium', clock: 0, house: false };
+const DEFAULT_PREFS: MenuPrefs = { variant: 'time', mode: 'bot', aiMatch: 'you', color: 'w', level: 'medium', clock: 0, house: false, simple: false };
 
 function loadPrefs(): MenuPrefs {
   try {
@@ -100,6 +102,8 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
   }, [prefs]);
   useEffect(() => saveHouseRules(house), [house]);
 
+  const chosenRules = prefs.house ? house : prefs.simple ? SIMPLE_RULES : STANDARD_RULES;
+
   const start = async () => {
     const human = prefs.color === 'random' ? (Math.random() < 0.5 ? 'w' : 'b') : prefs.color;
     if (prefs.mode === 'online') {
@@ -109,7 +113,7 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
       try {
         await onOnline({
           variant: prefs.variant,
-          rules: prefs.house ? house : STANDARD_RULES,
+          rules: chosenRules,
           clock: CLOCKS[prefs.clock].clock,
           color: human,
           name: name.trim() || 'Player 1',
@@ -135,7 +139,7 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
       ai: aiSeats,
       human: prefs.mode === 'local' || (prefs.mode === 'ai' && prefs.aiMatch === 'watch') ? 'w' : human,
       level: prefs.level,
-      rules: prefs.house ? house : STANDARD_RULES,
+      rules: chosenRules,
       house: prefs.house,
       clock: CLOCKS[prefs.clock].clock,
     });
@@ -143,6 +147,23 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
 
   return (
     <div className="menu">
+      <div className="rules-switch">
+        <div className="rules-slider" role="radiogroup" aria-label="Time rules">
+          <span className={`rules-thumb${prefs.simple ? '' : ' right'}`} aria-hidden />
+          <button role="radio" aria-checked={prefs.simple} className={prefs.simple ? 'on' : ''} onClick={() => set({ simple: true, house: false })}>
+            Simple
+          </button>
+          <button role="radio" aria-checked={!prefs.simple} className={!prefs.simple ? 'on' : ''} onClick={() => set({ simple: false, house: false })}>
+            Realistic <small>(OG rules)</small>
+          </button>
+        </div>
+        <p className="rules-note">
+          {prefs.simple
+            ? 'The past can be seen but not touched: pieces there just block squares.'
+            : 'Past boards are real: go back to T=0 and every piece is in its starting position. Capture there to rewrite history.'}
+        </p>
+      </div>
+
       <header className="hero">
         <div className="hero-glyphs" aria-hidden>
           <div className="hero-sq">
@@ -290,7 +311,9 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
         <div className="setup-row">
           <span className="field-label">Rules</span>
           <div className="seg">
-            <button className={!prefs.house ? 'on' : ''} onClick={() => set({ house: false })}>Standard</button>
+            <button className={!prefs.house ? 'on' : ''} onClick={() => set({ house: false })} title="Use the rules chosen with the slider at the top">
+              {prefs.simple ? 'Simple' : 'Realistic (OG rules)'}
+            </button>
             <button className={prefs.house ? 'on' : ''} onClick={() => { set({ house: true }); setEditing(true); }}>House rules</button>
           </div>
         </div>

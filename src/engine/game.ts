@@ -1,4 +1,4 @@
-import type { Color, GameState, Move, Piece, PieceType, Result, Rules, TimeEvent } from './types';
+import type { Color, Erasure, GameState, Move, Piece, PieceType, Result, Rules, TimeEvent } from './types';
 
 /** Standard Time Travel Limits: how far a piece may shift back / forward in time in one move. */
 export const STANDARD_TTL: Rules['ttl'] = {
@@ -10,7 +10,8 @@ export const STANDARD_TTL: Rules['ttl'] = {
   p: { back: 1, fwd: 1 },
 };
 
-export const STANDARD_RULES: Rules = {
+/** "Simple" rules: the past is history you can see but not touch. */
+export const SIMPLE_RULES: Rules = {
   ttl: STANDARD_TTL,
   /**
    * A piece's TTL limits both how far it can jump in one move and how far from the present it may
@@ -25,7 +26,17 @@ export const STANDARD_RULES: Rules = {
   allowPass: false,
   quietDraw: 150,
   timeTravel: true,
+  history: 'snapshot',
 };
+
+/**
+ * The standard rules ("OG rules"): past boards are real, pieces that go back stay on that board,
+ * and capturing a piece there rewrites history.
+ */
+export const STANDARD_RULES: Rules = { ...SIMPLE_RULES, history: 'living' };
+/** Same as STANDARD_RULES; the name the menu uses. */
+export const OG_RULES = STANDARD_RULES;
+export const isLiving = (s: GameState) => s.rules.history === 'living';
 
 export interface GameOptions {
   /** 1 = Time Travel Chess (8×8), 3 = 4D Chess (8×8×3) */
@@ -68,6 +79,13 @@ export function snapshotOf(pieces: Piece[], levels: number): string {
   return b.join('');
 }
 
+/** Which piece (by id) stood on each square of the present board; 0 = empty. */
+export function snapIdsOf(pieces: Piece[], levels: number): number[] {
+  const b = new Array<number>(64 * levels).fill(0);
+  for (const p of pieces) if (p.dt === 0) b[p.sq] = p.id;
+  return b;
+}
+
 export function newGame(opts: Partial<GameOptions> = {}): GameState {
   const levels = opts.levels ?? 1;
   const rules = opts.rules ?? STANDARD_RULES;
@@ -80,14 +98,43 @@ export function newGame(opts: Partial<GameOptions> = {}): GameState {
     pieces.push({ id: id++, type: 'p', color: 'b', sq: sqAt(f, 6, z), dt: 0, moved: false });
     pieces.push({ id: id++, type: BACK_RANK[f], color: 'b', sq: sqAt(f, 7, z), dt: 0, moved: false });
   }
-  return { levels, rules, ply: 0, pieces, snapshots: [snapshotOf(pieces, levels)], ep: -1, quiet: 0, result: null };
+  return fromPieces(pieces, levels, rules);
+}
+
+/** A fresh game starting from the given pieces (used by newGame, tests and history replays). */
+export function fromPieces(pieces: Piece[], levels: number, rules: Rules): GameState {
+  return {
+    levels,
+    rules,
+    ply: 0,
+    pieces,
+    snapshots: [snapshotOf(pieces, levels)],
+    snapIds: [snapIdsOf(pieces, levels)],
+    ep: -1,
+    quiet: 0,
+    result: null,
+    initial: pieces.map((p) => ({ ...p })),
+    record: [],
+    erasures: [],
+    voided: [],
+  };
 }
 
 // ---------------------------------------------------------------------------
 // Occupancy
 
 export const GHOST = 'ghost' as const;
-export type Occupant = Piece | typeof GHOST | null;
+/** OG rules: a piece standing on a past board as part of history (not a time traveller). */
+export interface HistPiece {
+  hist: true;
+  id: number;
+  type: PieceType;
+  color: Color;
+  /** the absolute turn of the board it stands on */
+  ply: number;
+}
+export type Occupant = Piece | HistPiece | typeof GHOST | null;
+export const isHist = (o: Occupant): o is HistPiece => !!o && o !== GHOST && 'hist' in o;
 
 const key = (sq: number, dt: number) => (dt + 16384) * 512 + sq;
 
@@ -111,10 +158,23 @@ export function at(c: Ctx, sq: number, L: number): Occupant {
   const p = c.occ.get(key(sq, L));
   if (p) return p;
   if (L < 0) {
-    const snap = c.s.snapshots[c.s.ply + L];
-    if (snap !== undefined && snap.charCodeAt(sq) !== 46) return GHOST;
+    const T = c.s.ply + L;
+    const snap = c.s.snapshots[T];
+    if (snap !== undefined && snap.charCodeAt(sq) !== 46) {
+      if (!isLiving(c.s)) return GHOST;
+      const ch = snap[sq];
+      const lower = ch.toLowerCase() as PieceType;
+      return { hist: true, id: c.s.snapIds[T][sq], type: lower, color: ch === lower ? 'b' : 'w', ply: T };
+    }
   }
   return null;
+}
+
+/** The capture (or history erasure) of whatever stands on the target, if allowed. */
+function captureOf(o: Occupant, mover: Piece): Pick<Move, 'capture' | 'erase'> | null {
+  if (!o || o === GHOST || o.color === mover.color) return null;
+  if (isHist(o)) return o.type === 'k' ? null : { capture: o.id, erase: o.ply }; // past kings can't be captured
+  return { capture: o.id };
 }
 
 export function layerRange(s: GameState, p: Piece): [number, number] {
@@ -211,9 +271,11 @@ function tryTarget(c: Ctx, p: Piece, to: number, L: number, out: Move[], mode: G
   const o = at(c, to, L);
   if (o === null) {
     if (wantQuiet(mode, p, L)) out.push({ pid: p.id, from: p.sq, fromDt: p.dt, to, toDt: L });
-  } else if (o !== GHOST && o.color !== p.color) {
-    out.push({ pid: p.id, from: p.sq, fromDt: p.dt, to, toDt: L, capture: o.id });
+    return;
   }
+  const cap = captureOf(o, p);
+  // Erasing history replays the whole game, so the bot's capture-only search leaves it out.
+  if (cap && !(cap.erase !== undefined && mode === 'captures')) out.push({ pid: p.id, from: p.sq, fromDt: p.dt, to, toDt: L, ...cap });
 }
 
 const PROMOS: PieceType[] = ['q', 'r', 'b', 'n'];
@@ -248,8 +310,9 @@ function pawnMoves(c: Ctx, p: Piece, lo: number, hi: number, out: Move[], mode: 
     }
     for (const t of hits) {
       const o = at(c, t, L);
-      if (o && o !== GHOST && o.color !== p.color) {
-        push({ pid: p.id, from: p.sq, fromDt: p.dt, to: t, toDt: L, capture: o.id });
+      const cap = captureOf(o, p);
+      if (cap && !(cap.erase !== undefined && mode === 'captures')) {
+        push({ pid: p.id, from: p.sq, fromDt: p.dt, to: t, toDt: L, ...cap });
       } else if (o === null && L === 0 && p.dt === 0 && c.s.ep === t && levelOf(t) === levelOf(p.sq)) {
         const victim = c.occ.get(key(t - 8 * dir, 0));
         if (victim) out.push({ pid: p.id, from: p.sq, fromDt: 0, to: t, toDt: 0, capture: victim.id, ep: true });
@@ -360,46 +423,71 @@ export function inCheck(s: GameState, color: Color, c: Ctx = ctxOf(s)): boolean 
 // Making moves
 
 export function applyMove(s: GameState, m: Move): { state: GameState; events: TimeEvent[] } {
-  const captured = m.capture !== undefined ? s.pieces.find((p) => p.id === m.capture) : undefined;
-  const pieces = s.pieces.filter((p) => p.id !== m.capture).map((p) => ({ ...p }));
-  const mover = pieces.find((p) => p.id === m.pid)!;
-  const wasPawn = mover.type === 'p';
-  mover.sq = m.to;
-  mover.dt = m.toDt;
-  mover.moved = true;
-  if (m.promo) mover.type = m.promo;
-  if (m.castle) {
-    const rook = pieces.find((p) => p.id === m.rookId)!;
-    rook.sq = m.castle === 'K' ? m.to - 1 : m.to + 1;
-    rook.moved = true;
+  if (m.erase !== undefined && isLiving(s)) return rewriteHistory(s, m);
+  return playTurn(s, m, m);
+}
+
+/**
+ * Plays one turn. `m` is the move to make, or null for a turn where nothing moves (during a
+ * history replay, when a recorded move no longer makes sense). `raw` is what goes in the record.
+ */
+function playTurn(s: GameState, m: Move | null, raw: Move): { state: GameState; events: TimeEvent[] } {
+  // Capturing a piece on a past board doesn't remove anything here: that's rewriteHistory's job.
+  const captured = m && m.capture !== undefined && m.erase === undefined ? s.pieces.find((p) => p.id === m.capture) : undefined;
+  const pieces = s.pieces.filter((p) => p.id !== captured?.id).map((p) => ({ ...p }));
+  let wasPawn = false;
+  let result: Result | null = null;
+  if (m) {
+    const mover = pieces.find((p) => p.id === m.pid)!;
+    wasPawn = mover.type === 'p';
+    mover.sq = m.to;
+    mover.dt = m.toDt;
+    mover.moved = true;
+    if (m.promo) mover.type = m.promo;
+    if (m.castle) {
+      const rook = pieces.find((p) => p.id === m.rookId)!;
+      rook.sq = m.castle === 'K' ? m.to - 1 : m.to + 1;
+      rook.moved = true;
+    }
+    if (captured?.type === 'k') result = { winner: mover.color, reason: 'King captured' };
   }
 
-  let result: Result | null = null;
-  if (captured?.type === 'k') result = { winner: mover.color, reason: 'King captured' };
-
-  // Time moves on: future pieces get one turn closer, and arrive when they reach the present.
+  // Time moves on. Future pieces get one turn closer and land when they reach the present.
+  // Under OG rules, past pieces stay on the board they went to, so they fall one turn further
+  // behind, and are pulled back to the present once they're further back than their limit.
+  const living = isLiving(s);
   const events: TimeEvent[] = [];
-  const arriving: Piece[] = [];
+  const landing: { p: Piece; kind: 'arrived' | 'returned' }[] = [];
   for (const p of pieces) {
-    if (p.dt > 0 && --p.dt === 0) arriving.push(p);
+    if (p.dt > 0) {
+      if (--p.dt === 0) landing.push({ p, kind: 'arrived' });
+    } else if (living && p.dt < 0) {
+      p.dt--;
+      if (-p.dt > ttlOf(s, p.type).back) {
+        p.dt = 0;
+        landing.push({ p, kind: 'returned' });
+      }
+    }
   }
   let survivors = pieces;
-  if (arriving.length) {
-    const taken = new Set(pieces.filter((p) => p.dt === 0 && !arriving.includes(p)).map((p) => p.sq));
+  if (landing.length) {
+    const landingIds = new Set(landing.map((l) => l.p.id));
+    const taken = new Set(pieces.filter((p) => p.dt === 0 && !landingIds.has(p.id)).map((p) => p.sq));
     const lost = new Set<number>();
-    for (const a of arriving) {
+    for (const { p: a, kind } of landing) {
       if (taken.has(a.sq)) {
         lost.add(a.id);
         events.push({ kind: 'lost', type: a.type, color: a.color, sq: a.sq });
         if (a.type === 'k') result = { winner: opp(a.color), reason: 'King lost in time' };
       } else {
-        events.push({ kind: 'arrived', type: a.type, color: a.color, sq: a.sq });
+        taken.add(a.sq);
+        events.push({ kind, type: a.type, color: a.color, sq: a.sq });
       }
     }
     if (lost.size) survivors = pieces.filter((p) => !lost.has(p.id));
   }
 
-  const ep = wasPawn && m.fromDt === 0 && m.toDt === 0 && Math.abs(m.to - m.from) === 16 ? (m.from + m.to) / 2 : -1;
+  const ep = m && wasPawn && m.fromDt === 0 && m.toDt === 0 && Math.abs(m.to - m.from) === 16 ? (m.from + m.to) / 2 : -1;
   return {
     state: {
       levels: s.levels,
@@ -407,12 +495,72 @@ export function applyMove(s: GameState, m: Move): { state: GameState; events: Ti
       ply: s.ply + 1,
       pieces: survivors,
       snapshots: [...s.snapshots, snapshotOf(survivors, s.levels)],
+      snapIds: [...s.snapIds, snapIdsOf(survivors, s.levels)],
       ep,
       quiet: captured || wasPawn ? 0 : s.quiet + 1,
       result,
+      initial: s.initial,
+      record: [...s.record, raw],
+      erasures: s.erasures,
+      voided: m ? s.voided : [...s.voided, s.ply],
     },
     events,
   };
+}
+
+// ---------------------------------------------------------------------------
+// OG rules: rewriting history
+
+/**
+ * A piece on a past board was captured: erase it from that turn onward and replay every move since,
+ * so it's gone from the present too, anything it captured later is back, and moves that no longer
+ * make sense don't happen.
+ */
+function rewriteHistory(s: GameState, m: Move): { state: GameState; events: TimeEvent[] } {
+  const T = m.erase!;
+  const ch = s.snapshots[T]?.[m.to] ?? '.';
+  const victim = { type: ch.toLowerCase() as PieceType, color: (ch === ch.toLowerCase() ? 'b' : 'w') as Color };
+  const erasures: Erasure[] = [...s.erasures, { ply: T, id: m.capture! }];
+  const { state, events } = replay(s, [...s.record, m], erasures);
+  return { state, events: [{ kind: 'erased', type: victim.type, color: victim.color, sq: m.to }, ...events] };
+}
+
+/** Replays a game from its first position with the given erasures applied. */
+export function replay(s: GameState, record: Move[], erasures: Erasure[]): { state: GameState; events: TimeEvent[] } {
+  let cur: GameState = { ...fromPieces(s.initial.map((p) => ({ ...p })), s.levels, s.rules), erasures };
+  cur = eraseNow(cur);
+  let events: TimeEvent[] = [];
+  for (const raw of record) {
+    if (cur.result) break;
+    const r = playTurn(cur, replayable(cur, raw), raw);
+    cur = eraseNow(r.state);
+    events = r.events;
+  }
+  return { state: cur, events };
+}
+
+/** Removes pieces erased at the current turn from the board (and from this turn's snapshot). */
+function eraseNow(s: GameState): GameState {
+  const gone = new Set(s.erasures.filter((e) => e.ply === s.ply).map((e) => e.id));
+  if (!gone.size || !s.pieces.some((p) => gone.has(p.id))) return s;
+  const pieces = s.pieces.filter((p) => !gone.has(p.id));
+  return {
+    ...s,
+    pieces,
+    snapshots: [...s.snapshots.slice(0, -1), snapshotOf(pieces, s.levels)],
+    snapIds: [...s.snapIds.slice(0, -1), snapIdsOf(pieces, s.levels)],
+  };
+}
+
+/** The recorded move as it would be played now, or null if it no longer can be. */
+function replayable(s: GameState, raw: Move): Move | null {
+  const p = s.pieces.find((x) => x.id === raw.pid);
+  if (!p || p.sq !== raw.from || p.dt !== raw.fromDt || p.color !== sideToMove(s)) return null;
+  const out: Move[] = [];
+  pieceMoves(ctxOf(s), p, out, 'all');
+  const m = out.find((x) => x.to === raw.to && x.toDt === raw.toDt && (x.promo ?? null) === (raw.promo ?? null) && (x.castle ?? null) === (raw.castle ?? null));
+  // A replayed move never starts another rewrite; it simply lands there.
+  return m ? { ...m, erase: undefined, capture: m.erase !== undefined ? undefined : m.capture } : null;
 }
 
 /** A move is legal if afterwards your king still exists and can't be captured. */

@@ -16,8 +16,9 @@ npm test         # rules engine tests
 
 ## Rules as implemented
 
-These are the standard rules. **House rules** (in the menu) can change every time limit, turn time travel
-off, drop the horizon, allow passing and change the draw rule.
+The time limits and future rules below apply to every rule set. How the **past** works is in "OG rules" further
+down. **House rules** (in the menu) can change every time limit, switch between living and simple history, turn
+time travel off, drop the horizon, allow passing and change the draw rule.
 
 | Piece  | TTL back | TTL forward |
 | ------ | -------- | ----------- |
@@ -38,8 +39,6 @@ off, drop the horizon, allow passing and change the draw rule.
   time. So a queen on d8 with d7/d6 empty now can land on d5 two turns ago, even if d7 was occupied back then.
 - **TTL is also a horizon.** A piece can never be further from the present than its TTL. Without this, a king
   could keep hopping further into the future and never be reachable. (`TTL_IS_HORIZON` in `src/engine/game.ts`.)
-- **The past:** you can land on a past square only if it was empty in that turn's snapshot. A piece in the past
-  keeps the same gap behind the present as the game goes on.
 - **Time catches up:** a piece already in the future can't jump further ahead (only move in space or back
   toward now). Otherwise kings escape forever by hopping forward, since only queens can reach that far.
 - **The future:** a future piece gets one turn closer every turn. When it reaches the present, it's lost if
@@ -48,6 +47,21 @@ off, drop the horizon, allow passing and change the draw rule.
 - **Check** is any enemy piece being able to capture your king, from any time. Checkmate works as usual.
 - **Castling** happens within one time. **En passant** works only in the present. **Promotion** works in any time.
 - **Draws:** stalemate, only kings left, or 150 turns without a capture or pawn move.
+
+## OG rules (the standard rules)
+
+The original idea: **living history**. These are the default; pick **Simple** in the menu for the easier version
+where the past can be seen but not touched (past pieces only block squares, and travellers keep a fixed gap).
+
+- Going back in time puts you on the **real board from then**: back to T=0 and every piece is in its starting
+  position (on the middle level in 4D Chess).
+- A piece that goes back **stays on that board** (it falls one turn further behind each turn). Once it's further
+  back than its time travel limit it's **pulled back** to the present on the same square, and lost if that square is taken.
+- Capturing a piece on a past board (not a king) **erases it from history** from that turn on. The game replays every
+  move since without it: it vanishes from the present, anything it captured later comes back, and moves that no
+  longer make sense didn't happen (crossed out in the move list).
+- Pieces on past boards don't move or attack; only pieces that travelled there act.
+- Engine: every game keeps its move record; an erasure replays it (`replay()` in `src/engine/game.ts`).
 
 ## 4D Chess: height
 

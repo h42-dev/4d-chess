@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { adjudicate, applyMove, ctxOf, inCheck, legalMoves, newGame, snapshotOf, sqAt, STANDARD_RULES } from './game';
+import { adjudicate, applyMove, ctxOf, fromPieces, inCheck, legalMoves, newGame, OG_RULES, SIMPLE_RULES, sqAt, STANDARD_RULES } from './game';
 import type { GameState, Move, Piece } from './types';
 
 const sq = (name: string) => (name.charCodeAt(0) - 97) + (Number(name[1]) - 1) * 8;
@@ -28,16 +28,12 @@ function findMove(s: GameState, mv: string): Move | undefined {
 /** Builds a position from scratch with a given history length. */
 function position(pieces: Omit<Piece, 'id' | 'moved'>[], ply: number, history?: string[], levels = 1): GameState {
   const ps = pieces.map((p, i) => ({ ...p, id: i + 1, moved: true }));
-  const snap = snapshotOf(ps, levels);
+  const s = fromPieces(ps, levels, STANDARD_RULES);
   return {
-    levels,
-    rules: STANDARD_RULES,
+    ...s,
     ply,
-    pieces: ps,
-    snapshots: history ?? Array.from({ length: ply + 1 }, () => snap),
-    ep: -1,
-    quiet: 0,
-    result: null,
+    snapshots: history ?? Array.from({ length: ply + 1 }, () => s.snapshots[0]),
+    snapIds: Array.from({ length: ply + 1 }, () => s.snapIds[0]),
   };
 }
 
@@ -69,13 +65,14 @@ describe('travelling into the past', () => {
     s = applyMove(s, back!).state;
     const q = s.pieces.find((p) => p.type === 'q' && p.color === 'b')!;
     expect(q.sq).toBe(sq('d5'));
-    expect(q.dt).toBe(-2);
+    // It stays on the T=1 board, which is 3 turns back once this turn is over.
+    expect(q.dt).toBe(-3);
     // White's pawn still in the present on the same square.
     expect(s.pieces.some((p) => p.sq === sq('d5') && p.dt === 0 && p.color === 'w')).toBe(true);
   });
 
-  it('past pieces keep a fixed gap as time moves on', () => {
-    let s = play(['e2e4', 'd7d5', 'e4d5', 'd8d5@-2', 'g1f3']);
+  it('Simple rules: past pieces keep a fixed gap as time moves on', () => {
+    let s = play(['e2e4', 'd7d5', 'e4d5', 'd8d5@-2', 'g1f3'], newGame({ rules: SIMPLE_RULES }));
     const q = s.pieces.find((p) => p.type === 'q' && p.color === 'b')!;
     expect(q.dt).toBe(-2);
     s = play(['a7a6'], s);
@@ -314,5 +311,85 @@ describe('4D chess (three levels)', () => {
 
   it('flat Time Travel Chess is unaffected', () => {
     expect(legalMoves(newGame()).filter((m) => m.toDt === 0)).toHaveLength(20);
+  });
+});
+
+describe('OG rules (living history)', () => {
+  const og = (moves: string[]) => play(moves, newGame({ rules: OG_RULES }));
+  const find = (s: GameState, from: string, fromDt: number, to: string, toDt: number) =>
+    legalMoves(s).find((m) => m.from === sq(from) && m.fromDt === fromDt && m.to === sq(to) && m.toDt === toDt);
+
+  it('going back to T=0 lands on the starting position, and capturing there erases the piece from the present', () => {
+    // 1. e4 a6: the queen can now leave d1 through e2, and drops back to T=0 on h5.
+    let s = og(['e2e4', 'a7a6']);
+    const back = find(s, 'd1', 0, 'h5', -2);
+    expect(back).toBeDefined();
+    s = applyMove(s, back!).state;
+    s = play(['h7h6'], s);
+    // The queen is still on the T=0 board (now 4 turns back), surrounded by the starting position.
+    const q = s.pieces.find((p) => p.type === 'q' && p.color === 'w')!;
+    expect(q.dt).toBe(-4);
+    // On that board f7 still has Black's pawn; taking it rewrites history.
+    const take = find(s, 'h5', -4, 'f7', -4);
+    expect(take?.erase).toBe(0);
+    const fPawn = take!.capture!;
+    const { state, events } = applyMove(s, take!);
+    expect(events[0]).toMatchObject({ kind: 'erased', type: 'p', color: 'b' });
+    expect(state.pieces.some((p) => p.id === fPawn)).toBe(false); // gone from the present
+    expect(state.snapshots[0][sq('f7')]).toBe('.'); // and from history
+    expect(state.pieces.find((p) => p.id === q.id)).toMatchObject({ sq: sq('f7'), dt: -5 });
+  });
+
+  it('erasing a piece brings back what it captured later, and its later moves never happen', () => {
+    const pieces = [
+      { id: 1, type: 'k', color: 'w', sq: sq('a1'), dt: 0, moved: true },
+      { id: 2, type: 'q', color: 'w', sq: sq('c1'), dt: 0, moved: true },
+      { id: 3, type: 'p', color: 'w', sq: sq('d4'), dt: 0, moved: true },
+      { id: 4, type: 'k', color: 'b', sq: sq('h8'), dt: 0, moved: true },
+      { id: 5, type: 'n', color: 'b', sq: sq('b8'), dt: 0, moved: true },
+    ] as Piece[];
+    let s = play(['a1a2', 'b8c6', 'a2a1', 'c6d4'], fromPieces(pieces, 1, OG_RULES));
+    expect(s.pieces.some((p) => p.id === 3)).toBe(false); // the knight took the d4 pawn
+    // The queen goes back two turns, to when the knight stood on c6, and takes it.
+    const take = find(s, 'c1', 0, 'c6', -2);
+    expect(take?.erase).toBe(2);
+    s = applyMove(s, take!).state;
+    expect(s.pieces.some((p) => p.id === 5)).toBe(false); // the knight is gone
+    expect(s.pieces.find((p) => p.id === 3)).toMatchObject({ sq: sq('d4'), dt: 0 }); // the pawn is back
+  });
+
+  it('a piece further back than its limit is pulled back to the present', () => {
+    const pieces = [
+      { id: 1, type: 'k', color: 'w', sq: sq('a1'), dt: 0, moved: true },
+      { id: 2, type: 'r', color: 'w', sq: sq('h1'), dt: 0, moved: true },
+      { id: 3, type: 'k', color: 'b', sq: sq('a8'), dt: 0, moved: true },
+    ] as Piece[];
+    const s = play(['a1a2', 'a8b8', 'a2a1', 'b8a8', 'a1a2', 'a8b8'], fromPieces(pieces, 1, OG_RULES));
+    // Rook to h4, four turns back: it stays there (now 5 back, its limit)...
+    let r = applyMove(s, find(s, 'h1', 0, 'h4', -4)!);
+    expect(r.state.pieces.find((p) => p.id === 2)!.dt).toBe(-5);
+    // ...and after one more turn it's too far back, so it's pulled into the present on h4.
+    r = applyMove(r.state, find(r.state, 'b8', 0, 'a8', 0)!);
+    expect(r.events).toContainEqual({ kind: 'returned', type: 'r', color: 'w', sq: sq('h4') });
+    expect(r.state.pieces.find((p) => p.id === 2)).toMatchObject({ sq: sq('h4'), dt: 0 });
+  });
+
+  it('past kings cannot be captured', () => {
+    const pieces = [
+      { id: 1, type: 'k', color: 'w', sq: sq('a1'), dt: 0, moved: true },
+      { id: 2, type: 'q', color: 'w', sq: sq('e1'), dt: 0, moved: true },
+      { id: 3, type: 'k', color: 'b', sq: sq('e8'), dt: 0, moved: true },
+    ] as Piece[];
+    // The black king has stepped from e8 to d8; on the past boards it's still on e8.
+    const s = play(['a1a2', 'e8d8'], fromPieces(pieces, 1, OG_RULES));
+    const toE8 = legalMoves(s).filter((m) => m.pid === 2 && m.to === sq('e8')).map((m) => m.toDt);
+    expect(toE8).toContain(0); // empty now
+    expect(toE8).not.toContain(-1); // the king's past self is there: no capture
+    expect(toE8).not.toContain(-2);
+  });
+
+  it('Simple rules: past pieces are history you can see but not touch', () => {
+    const s = play(['e2e4', 'a7a6', 'd1h5', 'a6a5'], newGame({ rules: SIMPLE_RULES }));
+    expect(legalMoves(s).some((m) => m.erase !== undefined)).toBe(false);
   });
 });

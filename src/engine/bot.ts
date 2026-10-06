@@ -16,6 +16,16 @@ const KING_ARRIVAL_RISK = 2500;
 
 class Timeout extends Error {}
 
+/**
+ * What a move captures. Under OG rules a capture on a past board can hit the past self of a piece
+ * that's no longer on the board now, so read its type from that board's snapshot.
+ */
+function victimType(s: GameState, m: Move): PieceType | null {
+  if (m.capture === undefined) return null;
+  if (m.erase !== undefined) return (s.snapshots[m.erase]?.[m.to]?.toLowerCase() as PieceType) ?? null;
+  return s.pieces.find((p) => p.id === m.capture)?.type ?? null;
+}
+
 function centre(sq: number, levels: number) {
   const f = fileOf(sq), r = rankOf(sq);
   const flat = 3.5 - Math.max(Math.abs(f - 3.5), Math.abs(r - 3.5)); // 0 at the edge … 3 in the middle
@@ -70,7 +80,8 @@ class Search {
     const byId = new Map(s.pieces.map((p) => [p.id, p]));
     const score = (m: Move) => {
       const mover = byId.get(m.pid)!;
-      if (m.capture !== undefined) return 10_000 + VAL[byId.get(m.capture)!.type] * 10 - VAL[mover.type] / 10 + (byId.get(m.capture)!.type === 'k' ? 1e6 : 0);
+      const victim = victimType(s, m);
+      if (victim) return 10_000 + VAL[victim] * 10 - VAL[mover.type] / 10 + (victim === 'k' ? 1e6 : 0);
       if (m.promo) return 9_000;
       return m.toDt === m.fromDt ? 0 : -50 - Math.abs(m.toDt);
     };
@@ -85,7 +96,7 @@ class Search {
     const moves = this.order(s, pseudoMoves(ctxOf(s), me, 'search'));
     let best = -Infinity;
     for (const m of moves) {
-      if (m.capture !== undefined && s.pieces.find((p) => p.id === m.capture)!.type === 'k') return MATE + depth;
+      if (m.erase === undefined && victimType(s, m) === 'k') return MATE + depth;
       const next = applyMove(s, m).state;
       if (!kingOf(next, me)) continue;
       const score = -this.negamax(next, depth - 1, -beta, -alpha);
@@ -102,7 +113,7 @@ class Search {
     if (s.result) return terminal(s, me, 0);
     this.tick();
     const caps = this.order(s, pseudoMoves(ctxOf(s), me, 'captures'));
-    if (caps.length && s.pieces.find((p) => p.id === caps[0].capture)!.type === 'k') return MATE;
+    if (caps.length && victimType(s, caps[0]) === 'k') return MATE;
     const stand = evaluate(s, me);
     if (stand >= beta || depth === 0) return stand;
     if (stand > alpha) alpha = stand;

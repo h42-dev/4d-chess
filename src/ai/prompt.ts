@@ -25,6 +25,12 @@ export function systemPrompt(s: GameState): string {
       '- Two pieces can share a square if they are in different times. You capture by landing on an enemy piece in its own time, within your time travel limit.',
       '- Check comes from any piece, in any time, that could capture the king.',
     );
+    if (r.history === 'living') {
+      rules.push(
+        '- OG RULES (living history): past boards are real. Going back to turn T puts your piece on the board exactly as it was at T (at T=0, the starting position). A piece that goes back stays on that board, so it falls one turn further behind every turn, and it is pulled back to the present (same square) once it is further back than its back limit; if that square is taken it is lost.',
+        '- On a past board you can capture the pieces that stood there (except kings). That erases the piece from history from that turn on, and every move since is replayed without it, so it disappears from the present and anything it captured later comes back. Captures like this are marked with × in the move list.',
+      );
+    }
   } else {
     rules.push('- House rules: time travel is switched off.');
   }

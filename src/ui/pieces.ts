@@ -58,8 +58,13 @@ export function describeMove(s: GameState, m: Move): string {
   } else {
     text = `${who} ${name(m.from)} → ${name(m.to)}${climb}${travel ? `, ${travel}` : ''}`;
   }
-  const victim = m.capture !== undefined ? s.pieces.find((x) => x.id === m.capture) : undefined;
-  if (victim) text += ` and took the ${colorName(victim.color).toLowerCase()} ${NAME[victim.type].toLowerCase()}`;
+  if (m.erase !== undefined) {
+    const h = fromChar(s.snapshots[m.erase]?.[m.to] ?? '.');
+    if (h) text += ` and erased the ${colorName(h.color).toLowerCase()} ${NAME[h.type].toLowerCase()} from history (T=${m.erase} onward)`;
+  } else {
+    const victim = m.capture !== undefined ? s.pieces.find((x) => x.id === m.capture) : undefined;
+    if (victim) text += ` and took the ${colorName(victim.color).toLowerCase()} ${NAME[victim.type].toLowerCase()}`;
+  }
   if (m.promo) text += `, promoting to a ${NAME[m.promo].toLowerCase()}`;
   return text;
 }

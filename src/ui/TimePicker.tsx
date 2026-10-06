@@ -1,7 +1,7 @@
 import { useEffect, useRef, type CSSProperties } from 'react';
 import { sqName } from '../engine/game';
 import type { GameState, Move, Piece } from '../engine/types';
-import { colorName, era, NAME, rel } from './pieces';
+import { colorName, era, fromChar, NAME, rel } from './pieces';
 import { Pc } from './Pc';
 
 interface Props {
@@ -67,7 +67,9 @@ export function TimePicker({ state, sq, flipped, piece, floating, moves, other, 
       )}
       <div className="topts">
         {options.map(([dt, ms]) => {
-          const victim = ms[0].capture !== undefined ? state.pieces.find((p) => p.id === ms[0].capture) : undefined;
+          const m0 = ms[0];
+          const hist = m0.erase !== undefined ? fromChar(state.snapshots[m0.erase]?.[m0.to] ?? '.') : null;
+          const victim = hist ?? (m0.capture !== undefined ? state.pieces.find((p) => p.id === m0.capture) : undefined);
           return (
             <button
               key={dt}
@@ -81,7 +83,7 @@ export function TimePicker({ state, sq, flipped, piece, floating, moves, other, 
               <small>T={state.ply + dt}</small>
               {victim && (
                 <em>
-                  takes <Pc type={victim.type} color={victim.color} />
+                  {hist ? 'erases' : 'takes'} <Pc type={victim.type} color={victim.color} />
                 </em>
               )}
             </button>

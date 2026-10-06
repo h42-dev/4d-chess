@@ -55,10 +55,24 @@ export function Rules({ onClose, rules = STANDARD_RULES, house = false }: { onCl
           <li>{rules.allowPass ? 'House rules allow passing: hopping one turn ahead on your own square.' : 'No passing: a piece can’t hop just one turn ahead on its own square.'}</li>
         </ul>
 
-        <h3>The past and the future</h3>
+        <h3>The past</h3>
+        {rules.history === 'living' ? (
+          <ul>
+            <li>Going back in time puts you on the <b>real board from then</b>. Go back to T=0 and every piece is in its starting position (on the middle level in 4D Chess).</li>
+            <li>You can land on a past square if it was empty back then, or capture the piece that stood there (not a king).</li>
+            <li>Capturing a piece on a past board <b>erases it from history</b> from that turn on. Every move since is replayed without it: it vanishes from the present, anything it captured later comes back, and moves that no longer make sense didn't happen (they're crossed out in the move list).</li>
+            <li>A piece that goes back <b>stays on that board</b>, so it falls one turn further behind each turn. Once it's further back than its time travel limit it's <b>pulled back</b> to the present on the same square, and lost if that square is taken.</li>
+            <li>Pieces on past boards don't move or attack. Only pieces that travelled there can act.</li>
+          </ul>
+        ) : (
+          <ul>
+            <li>These are the <b>Simple rules</b>: the past is history you can look at but not touch. You can land on a past square only if it was empty back then; the pieces shown there just block it.</li>
+            <li>A piece in the past stays the same number of turns behind the present.</li>
+          </ul>
+        )}
+
+        <h3>The future</h3>
         <ul>
-          <li>You can land on a past square only if it was empty <b>back then</b>. History shown in grey blocks landing but can't be captured.</li>
-          <li>A piece in the past stays the same number of turns behind the present.</li>
           <li>
             {rules.futureRunning
               ? 'House rules let a piece already in the future jump even further ahead.'
@@ -66,6 +80,12 @@ export function Rules({ onClose, rules = STANDARD_RULES, house = false }: { onCl
           </li>
           <li>A piece in the future gets one turn closer every turn. When time catches up it lands, unless anything is standing on its square. Then <b>it is lost</b>, and if it's your king, you lose.</li>
         </ul>
+
+        <h3>Rule sets</h3>
+        <p>
+          <b>Realistic (OG rules)</b>, with living history, are the standard. Use the slider at the top of the menu to switch to{' '}
+          <b>Simple</b>, an easier version where the past can be seen but not touched, or pick <b>House rules</b> to change any setting.
+        </p>
 
         <h3>Capturing &amp; check</h3>
         <ul>

@@ -31,10 +31,20 @@ export interface Move {
   castle?: 'K' | 'Q';
   rookId?: number;
   ep?: boolean;
+  /**
+   * OG rules: this move captures a piece on a past board, erasing it from history from that turn
+   * (the absolute turn number T) onward. `capture` holds the erased piece's id.
+   */
+  erase?: number;
 }
 
 export interface TimeEvent {
-  kind: 'arrived' | 'lost';
+  /**
+   * arrived: a future piece reached the present · lost: it landed on a taken square ·
+   * returned: (OG rules) a past piece was pulled back to the present · erased: (OG rules) a piece
+   * was removed from history
+   */
+  kind: 'arrived' | 'lost' | 'returned' | 'erased';
   type: PieceType;
   color: Color;
   sq: number;
@@ -54,6 +64,19 @@ export interface Rules {
   quietDraw: number;
   /** false = no time travel at all (plain chess, in 2D or 3D) */
   timeTravel: boolean;
+  /**
+   * snapshot: the past is history you can see but not touch (the main rules).
+   * living: "OG rules": past boards are real. Pieces that travel back stay on that board, can
+   * capture the pieces there (erasing them from history and replaying every move since), and are
+   * pulled back to the present once they fall further behind than their time travel limit.
+   */
+  history: 'snapshot' | 'living';
+}
+
+/** OG rules: a piece removed from history from turn `ply` onward. */
+export interface Erasure {
+  ply: number;
+  id: number;
 }
 
 export interface Result {
@@ -75,4 +98,14 @@ export interface GameState {
   /** turns since the last capture or pawn move */
   quiet: number;
   result: Result | null;
+  /** the pieces at the start, so history can be replayed (OG rules) */
+  initial: Piece[];
+  /** every move played, in order (replayed when history is rewritten) */
+  record: Move[];
+  /** OG rules: pieces erased from history */
+  erasures: Erasure[];
+  /** OG rules: turns whose recorded move no longer happens in the rewritten history */
+  voided: number[];
+  /** snapIds[k][sq] = id of the piece on that square in snapshot k (0 = empty) */
+  snapIds: number[][];
 }
