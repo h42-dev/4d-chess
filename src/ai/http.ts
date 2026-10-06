@@ -9,7 +9,16 @@ async function fail(res: Response, who: string): Promise<never> {
   } catch {
     /* not JSON */
   }
-  const hint = res.status === 401 || res.status === 403 ? ' (check the API key)' : res.status === 404 ? ' (check the model name or URL)' : res.status === 429 ? ' (rate limited or out of credit)' : '';
+  const text = String(detail);
+  const keyProblem = /api key|apikey|unauthori[sz]ed|invalid.*key|incorrect.*key/i.test(text) || res.status === 401;
+  const modelProblem = /model/i.test(text) || res.status === 404;
+  const hint = keyProblem
+    ? ' (check the API key)'
+    : modelProblem || res.status === 403
+      ? ' (this key may not be able to use that model; press “Find my models”)'
+      : res.status === 429
+        ? ' (rate limited or out of credit)'
+        : '';
   throw new Error(`${who} returned ${res.status}${hint}${detail ? `: ${String(detail).slice(0, 200)}` : ''}`);
 }
 
@@ -103,4 +112,48 @@ export async function askCustom(player: AiPlayer, request: BotRequest, signal: A
     return JSON.stringify({ move: request.legalMoves[data.index], comment: data.comment });
   }
   return JSON.stringify(data);
+}
+
+/**
+ * Asks the provider which models this key can use, so nobody has to guess model ids.
+ * Returns ids in the provider's own order, chat/text models only where the API says so.
+ */
+export async function listModels(player: AiPlayer, signal?: AbortSignal): Promise<string[]> {
+  let url: string;
+  const headers: Record<string, string> = {};
+  switch (player.provider) {
+    case 'gemini':
+      url = 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000';
+      headers['x-goog-api-key'] = player.apiKey ?? '';
+      break;
+    case 'openai':
+      url = 'https://api.openai.com/v1/models';
+      headers.Authorization = `Bearer ${player.apiKey ?? ''}`;
+      break;
+    case 'openrouter':
+      url = 'https://openrouter.ai/api/v1/models';
+      break;
+    case 'local':
+      url = `${(player.baseUrl ?? '').replace(/\/+$/, '')}/models`;
+      break;
+    default:
+      return [];
+  }
+  const who = player.provider === 'gemini' ? 'Gemini' : player.provider === 'openai' ? 'OpenAI' : player.provider === 'openrouter' ? 'OpenRouter' : 'Your local model';
+  let res: Response;
+  try {
+    res = await fetch(url, { headers, signal });
+  } catch (e) {
+    network(e, who, url);
+  }
+  if (!res.ok) await fail(res, who);
+  const data = await res.json();
+  if (player.provider === 'gemini') {
+    return (data?.models ?? [])
+      .filter((m: { supportedGenerationMethods?: string[] }) => m.supportedGenerationMethods?.includes('generateContent'))
+      .map((m: { name: string }) => m.name.replace(/^models\//, ''))
+      .filter((id: string) => !/embedding|tts|image|transcribe|live|veo|imagen|aqa/i.test(id));
+  }
+  const ids: string[] = (data?.data ?? []).map((m: { id: string }) => m.id);
+  return player.provider === 'openai' ? ids.filter((id) => /^(gpt|o\d|chatgpt)/.test(id) && !/audio|realtime|transcribe|tts|image|embedding|search/.test(id)) : ids;
 }

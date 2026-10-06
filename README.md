@@ -89,8 +89,8 @@ Pick **AI** in the menu to play an AI of your choice (**You vs AI**) or to watch
 | --- | --- |
 | Built-in bot | Nothing (easy / medium / hard) |
 | Claude (Anthropic) | An Anthropic API key. Default model `claude-opus-5-5`; also Sonnet 5.5, Haiku 4.5, Fable 5.1. "Thinking" sets the effort. |
-| ChatGPT (OpenAI) | An OpenAI API key and any model id your key can use |
-| Gemini (Google) | A Google AI Studio key and a model id |
+| ChatGPT (OpenAI) | An OpenAI API key (default `gpt-6.1-sol`) |
+| Gemini (Google) | A Google AI Studio key (default `gemini-3.8-flash`) |
 | OpenRouter | One key for hundreds of models (use the id from openrouter.ai/models) |
 | Local model | An OpenAI-compatible server such as Ollama (`http://localhost:11434/v1`) or LM Studio. Ollama needs `OLLAMA_ORIGINS` to include this site's address. |
 | Your own bot | A URL that speaks the Bot API below |
@@ -103,6 +103,9 @@ Pick **AI** in the menu to play an AI of your choice (**You vs AI**) or to watch
   pauses and offers **Try again** or **Let the built-in bot move**.
 - Claude uses the official Anthropic SDK (loaded only when a Claude player is in the game) with structured outputs
   and server-side refusal fallbacks (`fallbacks: "default"`).
+- **Find my models** asks the provider which models your key can use (Gemini, OpenAI, OpenRouter, local) and
+  fills in the list, so you don't have to guess model ids. Providers retire models: e.g. Gemini 2.5 is now limited
+  to older accounts, so new keys need a Gemini 3 model such as `gemini-3.8-flash`.
 - **Test connection** in the menu makes one request to check the key/URL/model before you start.
 
 ### Bot API (your own bot)

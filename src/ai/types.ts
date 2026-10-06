@@ -53,20 +53,20 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     short: 'GPT',
     needsKey: true,
     needsUrl: false,
-    defaultModel: 'gpt-5',
-    models: ['gpt-5', 'gpt-5-mini'],
+    defaultModel: 'gpt-6.1-sol',
+    models: ['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna'],
     keyUrl: 'https://platform.openai.com/api-keys',
-    help: 'Uses your OpenAI API key. Type any model id your key can use.',
+    help: 'Uses your OpenAI API key. Press “Find my models” to see which models your key can use.',
   },
   gemini: {
     label: 'Gemini (Google)',
     short: 'Gemini',
     needsKey: true,
     needsUrl: false,
-    defaultModel: 'gemini-2.5-pro',
-    models: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+    defaultModel: 'gemini-3.8-flash',
+    models: ['gemini-3.8-flash', 'gemini-3.7-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview'],
     keyUrl: 'https://aistudio.google.com/apikey',
-    help: 'Uses your Google AI Studio key. Type any model id your key can use.',
+    help: 'Uses your Google AI Studio key. Press “Find my models” to see which models your key can use.',
   },
   openrouter: {
     label: 'OpenRouter (any model)',
@@ -74,7 +74,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     needsKey: true,
     needsUrl: false,
     defaultModel: 'anthropic/claude-opus-5-5',
-    models: ['anthropic/claude-opus-5-5', 'openai/gpt-5', 'google/gemini-2.5-pro', 'meta-llama/llama-4-maverick'],
+    models: ['anthropic/claude-opus-5-5', 'openai/gpt-6.1-sol', 'google/gemini-3.8-flash', 'meta-llama/llama-4-maverick'],
     keyUrl: 'https://openrouter.ai/keys',
     help: 'One key for hundreds of models. Use the model id from openrouter.ai/models.',
   },
@@ -149,8 +149,16 @@ export function saveSaved(s: SavedAi) {
   }
 }
 
+/** Old default model ids that providers have since restricted for new keys. */
+const RETIRED: Partial<Record<ProviderId, RegExp>> = {
+  gemini: /^gemini-2\.(0|5)-/,
+  openai: /^gpt-5(-mini)?$/,
+};
+
 /** The player saved in a slot, with its provider's key filled in. */
 export function slotPlayer(saved: SavedAi, slot: SlotId, fallback: ProviderId): AiPlayer {
   const base = saved.slots[slot] ?? defaultPlayer(fallback);
-  return { ...base, apiKey: saved.keys[base.provider] };
+  // Saved settings may still name an old default that new keys can't use; move them to today's default.
+  const model = RETIRED[base.provider]?.test(base.model) ? PROVIDERS[base.provider].defaultModel : base.model;
+  return { ...base, model, apiKey: saved.keys[base.provider] };
 }

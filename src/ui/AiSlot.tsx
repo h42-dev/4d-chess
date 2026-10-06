@@ -21,6 +21,33 @@ const EFFORTS: { id: Effort; label: string; note: string }[] = [
 export function AiSlot({ title, value, keys, variant, onChange }: Props) {
   const info = PROVIDERS[value.provider];
   const [test, setTest] = useState<{ state: 'idle' | 'busy' | 'ok' | 'error'; text?: string }>({ state: 'idle' });
+  /** models the provider says this key can use (null until looked up) */
+  const [found, setFound] = useState<{ provider: ProviderId; ids: string[]; note?: string; error?: string } | null>(null);
+  const [finding, setFinding] = useState(false);
+  const canList = ['gemini', 'openai', 'openrouter', 'local'].includes(value.provider);
+
+  const findModels = async () => {
+    setFinding(true);
+    try {
+      const { listModels } = await import('../ai/http');
+      const ids = await listModels(value);
+      if (!ids.length) {
+        setFound({ provider: value.provider, ids, error: 'No usable models came back for this key.' });
+      } else if (!ids.includes(value.model)) {
+        // The current model isn't available to this key: switch to the default if allowed, else the first one.
+        const pick = ids.includes(info.defaultModel) ? info.defaultModel : ids[0];
+        onChange({ ...value, model: pick });
+        setFound({ provider: value.provider, ids, note: `${ids.length} models available. “${value.model || '(none)'}” isn’t one of them, so I picked ${pick}.` });
+      } else {
+        setFound({ provider: value.provider, ids, note: `${ids.length} models available, including the one selected.` });
+      }
+    } catch (e) {
+      setFound({ provider: value.provider, ids: [], error: (e as Error).message });
+    } finally {
+      setFinding(false);
+    }
+  };
+  const suggestions = found && found.provider === value.provider && found.ids.length ? found.ids : info.models;
   const set = (p: Partial<AiPlayer>) => {
     setTest({ state: 'idle' });
     onChange({ ...value, ...p });
@@ -82,10 +109,19 @@ export function AiSlot({ title, value, keys, variant, onChange }: Props) {
                 spellCheck={false}
               />
               <datalist id={`models-${value.provider}`}>
-                {info.models.map((m) => (
+                {suggestions.map((m) => (
                   <option key={m} value={m} />
                 ))}
               </datalist>
+              {canList && (
+                <span className="find-models">
+                  <button type="button" onClick={findModels} disabled={finding || (info.needsKey && !value.apiKey)} title={info.needsKey && !value.apiKey ? 'Paste your key first' : 'Ask the provider which models this key can use'}>
+                    {finding ? 'Looking…' : 'Find my models'}
+                  </button>
+                  {found?.provider === value.provider && found.note && <small className="ai-test-ok">{found.note}</small>}
+                  {found?.provider === value.provider && found.error && <small className="ai-test-error">{found.error}</small>}
+                </span>
+              )}
             </label>
           )}
           {info.needsKey && (

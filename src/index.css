@@ -1350,3 +1350,6 @@ nav.top {
 }
 .rules-thumb.right { transform: translateX(100%); background: linear-gradient(135deg, var(--past), var(--future)); }
 .rules-note { margin: 0; font-size: 13.5px; color: var(--muted); text-align: center; line-height: 1.45; min-height: 2.9em; }
+.find-models { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.find-models button { font-size: 12.5px; padding: 5px 10px; }
+.find-models small { font-size: 12px; }
