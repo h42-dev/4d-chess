@@ -96,6 +96,9 @@ export function Game({ config, online, onMenu, onRules }: Props) {
   const [manualFlip, setManualFlip] = useState((config.mode === 'bot' || config.mode === 'online' || config.mode === 'ai') && config.human === 'b');
   const [paused, setPaused] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  /** an AI provider was busy or rate limited: when we'll try again by ourselves */
+  const [aiWait, setAiWait] = useState<{ message: string; until: number; attempt: number } | null>(null);
+  const autoRetries = useRef(0);
   /** why the last enemy piece you clicked couldn't be captured */
   const [why, setWhy] = useState<string | null>(null);
   const [promo, setPromo] = useState<Move[] | null>(null);
@@ -322,7 +325,7 @@ export function Game({ config, online, onMenu, onRules }: Props) {
 
   // Whenever it's a machine's turn (built-in bot or connected AI), ask it for a move.
   useEffect(() => {
-    if (!botTurn || !seat || paused || aiError) return;
+    if (!botTurn || !seat || paused || aiError || aiWait) return;
     const my = ++token.current;
     const ctrl = new AbortController();
     setThinking(true);
@@ -349,10 +352,20 @@ export function Game({ config, online, onMenu, onRules }: Props) {
       await new Promise((r) => setTimeout(r, Math.max(0, minWait - (Date.now() - started))));
       if (token.current !== my) return;
       setThinking(false);
+      autoRetries.current = 0;
       if (move) play(move, meta);
-    })().catch((e: Error) => {
+    })().catch((e: Error & { kind?: string; retryAfterMs?: number }) => {
       if (ctrl.signal.aborted || token.current !== my) return;
       setThinking(false);
+      // Busy or rate limited: wait it out and try again by ourselves, a few times, before asking.
+      if ((e.kind === 'busy' || e.kind === 'rate') && autoRetries.current < AUTO_RETRY_WAITS.length) {
+        const base = AUTO_RETRY_WAITS[autoRetries.current] * 1000;
+        const wait = Math.min(Math.max(e.retryAfterMs ?? 0, base), 90_000);
+        autoRetries.current++;
+        setAiWait({ message: e.message, until: Date.now() + wait, attempt: autoRetries.current });
+        return;
+      }
+      autoRetries.current = 0;
       setAiError(`${playerName(seat)} couldn't move: ${e.message}`);
     });
     return () => {
@@ -360,7 +373,14 @@ export function Game({ config, online, onMenu, onRules }: Props) {
       token.current++;
       setThinking(false);
     };
-  }, [botTurn, seat, paused, aiError, aiVsAi, cur, config.clock, play, settings.botPace, engineMove]);
+  }, [botTurn, seat, paused, aiError, aiWait, aiVsAi, cur, config.clock, play, settings.botPace, engineMove]);
+
+  // When the wait is over, clearing it lets the effect above ask again.
+  useEffect(() => {
+    if (!aiWait) return;
+    const t = setTimeout(() => setAiWait(null), Math.max(0, aiWait.until - Date.now()));
+    return () => clearTimeout(t);
+  }, [aiWait]);
 
   /** After an AI error: let the built-in bot make this one move instead. */
   const substitute = async () => {
@@ -371,6 +391,8 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     if (token.current !== my) return;
     setThinking(false);
     setAiError(null);
+    setAiWait(null);
+    autoRetries.current = 0;
     if (move) play(move, { note: `The built-in bot moved for ${playerName(seat)}` });
   };
 
@@ -808,12 +830,36 @@ export function Game({ config, online, onMenu, onRules }: Props) {
           </div>
         )}
 
+        {aiWait && !aiError && !result && seat && (
+          <div className="card ai-wait">
+            <strong>
+              {playerName(seat)} is {/ 429|rate|too many/i.test(aiWait.message) ? 'rate limited' : 'busy'}. Trying again in <Countdown until={aiWait.until} />
+            </strong>
+            <span>{aiWait.message}</span>
+            <span className="muted small">
+              Automatic retry {aiWait.attempt} of {AUTO_RETRY_WAITS.length}. Free keys allow only a few requests a minute; a “lite” model or another provider
+              often has more room.
+            </span>
+            <div className="row">
+              <button className="primary" onClick={() => setAiWait(null)}>Try now</button>
+              <button onClick={substitute}>Let the built-in bot move</button>
+            </div>
+          </div>
+        )}
         {aiError && !result && (
           <div className="card alert ai-error">
             <strong>The AI got stuck</strong>
             <span>{aiError}</span>
             <div className="row">
-              <button className="primary" onClick={() => setAiError(null)}>Try again</button>
+              <button
+                className="primary"
+                onClick={() => {
+                  autoRetries.current = 0;
+                  setAiError(null);
+                }}
+              >
+                Try again
+              </button>
               <button onClick={substitute}>Let the built-in bot move</button>
             </div>
           </div>
@@ -881,6 +927,19 @@ export function Game({ config, online, onMenu, onRules }: Props) {
       </aside>
     </div>
   );
+}
+
+/** How long to wait before each automatic retry when an AI is busy (seconds). */
+const AUTO_RETRY_WAITS = [10, 20, 30, 45, 60];
+
+/** Seconds left until a moment. */
+function Countdown({ until }: { until: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(id);
+  }, []);
+  return <b className="countdown">{Math.max(0, Math.ceil((until - now) / 1000))}s</b>;
 }
 
 /** Seconds since the machine started thinking (AIs can take a while). */

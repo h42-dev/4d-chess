@@ -1,29 +1,72 @@
 import type { AiPlayer } from './types';
 
-/** Turns a failed HTTP response into a readable error, using the provider's message when it has one. */
-async function fail(res: Response, who: string): Promise<never> {
-  let detail = '';
+/**
+ * What went wrong with a provider, so the game can react sensibly:
+ * busy (overloaded, 5xx) and rate (too many requests right now) are worth waiting out;
+ * quota (daily/free allowance used up or out of credit), key and model need the player.
+ */
+export type ProblemKind = 'busy' | 'rate' | 'quota' | 'key' | 'model' | 'other';
+
+export class ProviderError extends Error {
+  status: number;
+  kind: ProblemKind;
+  /** how long the provider asked us to wait, if it said */
+  retryAfterMs?: number;
+  constructor(message: string, status: number, kind: ProblemKind, retryAfterMs?: number) {
+    super(message);
+    this.name = 'ProviderError';
+    this.status = status;
+    this.kind = kind;
+    this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** "37s", "1.5s" → milliseconds */
+const durationMs = (d: unknown) => (typeof d === 'string' && /^[\d.]+s$/.test(d) ? Math.round(parseFloat(d) * 1000) : undefined);
+
+const HINTS: Record<ProblemKind, string> = {
+  busy: 'the service is overloaded right now; this usually passes in a minute',
+  rate: 'too many requests for this key right now. Free keys only allow a few per minute',
+  quota: 'this key’s allowance is used up (daily free limit or credit). Try another model, since each has its own limit, wait for it to reset, or add billing',
+  key: 'check the API key',
+  model: 'this key may not be able to use that model; press “Find my models”',
+  other: '',
+};
+
+/** Reads a failed response into a ProviderError, using the provider's own message and hints. */
+export async function problemOf(res: Response, who: string): Promise<ProviderError> {
+  let body: { error?: { message?: string; code?: string | number; status?: string; details?: Record<string, unknown>[] } | string; message?: string } = {};
   try {
-    const body = await res.json();
-    detail = body?.error?.message ?? body?.error ?? body?.message ?? '';
+    body = await res.json();
   } catch {
     /* not JSON */
   }
-  const text = String(detail);
-  const busy = res.status >= 500;
-  const keyProblem = /api key|apikey|unauthori[sz]ed|invalid.*key|incorrect.*key/i.test(text) || res.status === 401;
-  const modelProblem = /model/i.test(text) || res.status === 404;
-  // Order matters: a busy server's message often mentions "model" too.
-  const hint = busy
-    ? ' (the service is busy or having trouble right now; try again in a moment, or pick another model)'
-    : keyProblem
-      ? ' (check the API key)'
-      : modelProblem || res.status === 403
-        ? ' (this key may not be able to use that model; press “Find my models”)'
-        : res.status === 429
-          ? ' (rate limited or out of credit; wait a moment)'
-          : '';
-  throw new Error(`${who} returned ${res.status}${hint}${detail ? `: ${String(detail).slice(0, 200)}` : ''}`);
+  const err = typeof body.error === 'object' ? body.error : undefined;
+  const detail = String(err?.message ?? (typeof body.error === 'string' ? body.error : '') ?? body.message ?? '');
+  const details = err?.details ?? [];
+  const typeOf = (d: Record<string, unknown>) => String(d['@type'] ?? '');
+
+  // Google sends how long to wait (RetryInfo) and which quota ran out (QuotaFailure).
+  const googleWait = durationMs(details.find((d) => typeOf(d).endsWith('RetryInfo'))?.retryDelay);
+  const header = Number(res.headers.get('retry-after'));
+  const retryAfterMs = googleWait ?? (header > 0 ? header * 1000 : undefined);
+  const violations = (details.find((d) => typeOf(d).endsWith('QuotaFailure'))?.violations as { quotaId?: string; quotaMetric?: string }[] | undefined) ?? [];
+  const daily = violations.some((v) => /PerDay|per_day|daily/i.test(`${v.quotaId ?? ''} ${v.quotaMetric ?? ''}`));
+
+  let kind: ProblemKind;
+  if (res.status >= 500) kind = 'busy'; // checked first: busy messages often mention "model"
+  // Google says "exceeded your current quota" for per-minute limits too; those come with a wait time.
+  else if (res.status === 429) kind = daily || err?.code === 'insufficient_quota' || (/quota|billing|credit/i.test(detail) && !googleWait) ? 'quota' : 'rate';
+  else if (/api key|apikey|unauthori[sz]ed|invalid.*key|incorrect.*key/i.test(detail) || res.status === 401) kind = 'key';
+  else if (/model/i.test(detail) || res.status === 404 || res.status === 403) kind = 'model';
+  else kind = 'other';
+
+  const hint = HINTS[kind] ? ` (${HINTS[kind]})` : '';
+  return new ProviderError(`${who} returned ${res.status}${hint}${detail ? `: ${detail.slice(0, 200)}` : ''}`, res.status, kind, retryAfterMs);
+}
+
+async function fail(res: Response, who: string): Promise<never> {
+  throw await problemOf(res, who);
 }
 
 function network(e: unknown, who: string, url: string): never {
@@ -31,8 +74,8 @@ function network(e: unknown, who: string, url: string): never {
   throw new Error(`Couldn't reach ${who} at ${url}. If it's on your computer, make sure it's running and allows requests from this site (CORS).`);
 }
 
-/** Waits between retries when a provider is busy. Shortened in tests. */
-export const retryPolicy = { delays: [1000, 3000, 7000] };
+/** Short in-request retries for brief overloads. Shortened in tests. */
+export const retryPolicy = { delays: [2000, 5000], maxWaitMs: 15_000 };
 
 const sleep = (ms: number, signal?: AbortSignal) =>
   new Promise<void>((resolve, reject) => {
@@ -44,8 +87,9 @@ const sleep = (ms: number, signal?: AbortSignal) =>
   });
 
 /**
- * fetch, retried a few times when the provider is overloaded or rate limiting (429 / 5xx), since
- * those usually clear within seconds. Other errors are reported straight away.
+ * fetch, retried a couple of times when the provider is briefly overloaded or rate limiting.
+ * If it asks for a longer wait than we're willing to block for, the error is passed up with that
+ * wait so the game can count it down and try again by itself.
  */
 async function request(url: string, init: RequestInit, who: string, signal?: AbortSignal): Promise<Response> {
   for (let attempt = 0; ; attempt++) {
@@ -56,10 +100,11 @@ async function request(url: string, init: RequestInit, who: string, signal?: Abo
       network(e, who, url);
     }
     if (res.ok) return res;
-    const retryable = res.status === 429 || res.status >= 500;
-    if (!retryable || attempt >= retryPolicy.delays.length) await fail(res, who);
-    const after = Number(res.headers.get('retry-after'));
-    await sleep(after > 0 && after < 30 ? after * 1000 : retryPolicy.delays[attempt], signal);
+    const err = await problemOf(res, who);
+    const wait = err.retryAfterMs ?? retryPolicy.delays[attempt];
+    const worthWaiting = (err.kind === 'busy' || err.kind === 'rate') && attempt < retryPolicy.delays.length && wait <= retryPolicy.maxWaitMs;
+    if (!worthWaiting) throw err;
+    await sleep(wait, signal);
   }
 }
 

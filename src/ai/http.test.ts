@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { askGemini, askOpenAICompatible, listModels, retryPolicy } from './http';
+import { askGemini, askOpenAICompatible, listModels, ProviderError, retryPolicy } from './http';
 import { slotPlayer } from './types';
 
 function mockFetch(status: number, json: unknown) {
@@ -109,7 +109,7 @@ describe('other AI providers', () => {
     retryPolicy.delays = [0, 0, 0];
     mockFetch(503, { error: { code: 503, message: 'This model is currently experiencing high demand.' } });
     const err = askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'k' }, 'S', 'U', signal);
-    await expect(err).rejects.toThrow(/busy or having trouble/);
+    await expect(err).rejects.toThrow(/overloaded right now/);
     await expect(askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'k' }, 'S', 'U', signal)).rejects.not.toThrow(/Find my models/);
   });
 
@@ -117,6 +117,41 @@ describe('other AI providers', () => {
     retryPolicy.delays = [0, 0, 0];
     const calls = mockFetch(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
     await expect(askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'bad' }, 'S', 'U', signal)).rejects.toThrow(/check the API key/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('Gemini per-minute limit: hands back Google’s wait time instead of hammering the key', async () => {
+    retryPolicy.delays = [0, 0];
+    retryPolicy.maxWaitMs = 15_000;
+    const calls = mockFetch(429, {
+      error: {
+        code: 429,
+        message: 'You exceeded your current quota, please check your plan and billing details.',
+        status: 'RESOURCE_EXHAUSTED',
+        details: [
+          { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerMinutePerProjectPerModel-FreeTier' }] },
+          { '@type': 'type.googleapis.com/google.rpc.RetryInfo', retryDelay: '37s' },
+        ],
+      },
+    });
+    const err = await askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'k' }, 'S', 'U', signal).catch((e) => e);
+    expect(err).toBeInstanceOf(ProviderError);
+    expect(err).toMatchObject({ kind: 'rate', status: 429, retryAfterMs: 37_000 });
+    expect(calls).toHaveLength(1); // 37s is longer than we block for: the game counts it down instead
+  });
+
+  it('Gemini daily limit: reported as used up, not retried', async () => {
+    retryPolicy.delays = [0, 0];
+    const calls = mockFetch(429, {
+      error: {
+        code: 429,
+        message: 'You exceeded your current quota.',
+        details: [{ '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [{ quotaId: 'GenerateRequestsPerDayPerProjectPerModel-FreeTier' }] }],
+      },
+    });
+    const err = await askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'k' }, 'S', 'U', signal).catch((e) => e);
+    expect(err).toMatchObject({ kind: 'quota' });
+    expect(err.message).toMatch(/allowance is used up/);
     expect(calls).toHaveLength(1);
   });
 });

@@ -106,6 +106,9 @@ Pick **AI** in the menu to play an AI of your choice (**You vs AI**) or to watch
 - **Find my models** asks the provider which models your key can use (Gemini, OpenAI, OpenRouter, local) and
   fills in the list, so you don't have to guess model ids. Providers retire models: e.g. Gemini 2.5 is now limited
   to older accounts, so new keys need a Gemini 3 model such as `gemini-3.8-flash`.
+- **Busy or rate-limited providers** (429 / 5xx, e.g. free Gemini keys) are retried briefly inside the request,
+  then the game counts down and tries again by itself (10s, 20s, 30s, 45s, 60s, or longer if the provider asks),
+  with **Try now** / **Let the built-in bot move**. A used-up daily allowance is reported straight away.
 - **Test connection** in the menu makes one request to check the key/URL/model before you start.
 
 ### Bot API (your own bot)

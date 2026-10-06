@@ -1353,3 +1353,7 @@ nav.top {
 .find-models { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
 .find-models button { font-size: 12.5px; padding: 5px 10px; }
 .find-models small { font-size: 12px; }
+.card.ai-wait { gap: 4px; font-size: 13px; color: var(--muted); border-color: var(--now); background: color-mix(in srgb, var(--now) 8%, var(--panel)); }
+.card.ai-wait strong { color: var(--text); font-size: 14px; }
+.card.ai-wait .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+.countdown { color: var(--now-hi); font-variant-numeric: tabular-nums; }
