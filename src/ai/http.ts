@@ -10,21 +10,57 @@ async function fail(res: Response, who: string): Promise<never> {
     /* not JSON */
   }
   const text = String(detail);
+  const busy = res.status >= 500;
   const keyProblem = /api key|apikey|unauthori[sz]ed|invalid.*key|incorrect.*key/i.test(text) || res.status === 401;
   const modelProblem = /model/i.test(text) || res.status === 404;
-  const hint = keyProblem
-    ? ' (check the API key)'
-    : modelProblem || res.status === 403
-      ? ' (this key may not be able to use that model; press “Find my models”)'
-      : res.status === 429
-        ? ' (rate limited or out of credit)'
-        : '';
+  // Order matters: a busy server's message often mentions "model" too.
+  const hint = busy
+    ? ' (the service is busy or having trouble right now; try again in a moment, or pick another model)'
+    : keyProblem
+      ? ' (check the API key)'
+      : modelProblem || res.status === 403
+        ? ' (this key may not be able to use that model; press “Find my models”)'
+        : res.status === 429
+          ? ' (rate limited or out of credit; wait a moment)'
+          : '';
   throw new Error(`${who} returned ${res.status}${hint}${detail ? `: ${String(detail).slice(0, 200)}` : ''}`);
 }
 
 function network(e: unknown, who: string, url: string): never {
   if ((e as Error).name === 'AbortError') throw e;
   throw new Error(`Couldn't reach ${who} at ${url}. If it's on your computer, make sure it's running and allows requests from this site (CORS).`);
+}
+
+/** Waits between retries when a provider is busy. Shortened in tests. */
+export const retryPolicy = { delays: [1000, 3000, 7000] };
+
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(new DOMException('Aborted', 'AbortError'));
+    });
+  });
+
+/**
+ * fetch, retried a few times when the provider is overloaded or rate limiting (429 / 5xx), since
+ * those usually clear within seconds. Other errors are reported straight away.
+ */
+async function request(url: string, init: RequestInit, who: string, signal?: AbortSignal): Promise<Response> {
+  for (let attempt = 0; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(url, { ...init, signal });
+    } catch (e) {
+      network(e, who, url);
+    }
+    if (res.ok) return res;
+    const retryable = res.status === 429 || res.status >= 500;
+    if (!retryable || attempt >= retryPolicy.delays.length) await fail(res, who);
+    const after = Number(res.headers.get('retry-after'));
+    await sleep(after > 0 && after < 30 ? after * 1000 : retryPolicy.delays[attempt], signal);
+  }
 }
 
 /** OpenAI, OpenRouter and local servers (Ollama, LM Studio…) all speak the OpenAI chat format. */
@@ -49,22 +85,16 @@ export async function askOpenAICompatible(player: AiPlayer, system: string, user
   if (player.provider !== 'local') body.response_format = { type: 'json_object' };
 
   const url = `${base}/chat/completions`;
-  let res: Response;
-  try {
-    res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal });
-  } catch (e) {
-    network(e, who, url);
-  }
-  if (!res.ok) await fail(res, who);
+  const res = await request(url, { method: 'POST', headers, body: JSON.stringify(body) }, who, signal);
   const data = await res.json();
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
 export async function askGemini(player: AiPlayer, system: string, user: string, signal: AbortSignal): Promise<string> {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(player.model)}:generateContent`;
-  let res: Response;
-  try {
-    res = await fetch(url, {
+  const res = await request(
+    url,
+    {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-goog-api-key': player.apiKey ?? '' },
       body: JSON.stringify({
@@ -72,12 +102,10 @@ export async function askGemini(player: AiPlayer, system: string, user: string, 
         contents: [{ role: 'user', parts: [{ text: user }] }],
         generationConfig: { responseMimeType: 'application/json' },
       }),
-      signal,
-    });
-  } catch (e) {
-    network(e, 'Gemini', url);
-  }
-  if (!res.ok) await fail(res, 'Gemini');
+    },
+    'Gemini',
+    signal,
+  );
   const data = await res.json();
   return (data?.candidates?.[0]?.content?.parts ?? []).map((p: { text?: string }) => p.text ?? '').join('');
 }
@@ -140,13 +168,7 @@ export async function listModels(player: AiPlayer, signal?: AbortSignal): Promis
       return [];
   }
   const who = player.provider === 'gemini' ? 'Gemini' : player.provider === 'openai' ? 'OpenAI' : player.provider === 'openrouter' ? 'OpenRouter' : 'Your local model';
-  let res: Response;
-  try {
-    res = await fetch(url, { headers, signal });
-  } catch (e) {
-    network(e, who, url);
-  }
-  if (!res.ok) await fail(res, who);
+  const res = await request(url, { headers }, who, signal);
   const data = await res.json();
   if (player.provider === 'gemini') {
     return (data?.models ?? [])

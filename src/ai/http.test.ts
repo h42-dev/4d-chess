@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { askGemini, askOpenAICompatible, listModels } from './http';
+import { askGemini, askOpenAICompatible, listModels, retryPolicy } from './http';
 import { slotPlayer } from './types';
 
 function mockFetch(status: number, json: unknown) {
@@ -87,5 +87,36 @@ describe('other AI providers', () => {
     expect(p.apiKey).toBe('k');
     const kept = slotPlayer({ remember: true, keys: {}, slots: { opp: { provider: 'gemini', model: 'gemini-3.7-flash' } } }, 'opp', 'claude');
     expect(kept.model).toBe('gemini-3.7-flash');
+  });
+
+  it('a busy provider (503) is retried, and the move goes through', async () => {
+    retryPolicy.delays = [0, 0, 0];
+    let n = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        n++;
+        return n < 3
+          ? new Response(JSON.stringify({ error: { code: 503, message: 'This model is currently experiencing high demand.' } }), { status: 503 })
+          : new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: '{"move":"e2→e4"}' }] } }] }), { status: 200 });
+      }),
+    );
+    expect(await askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'k' }, 'S', 'U', signal)).toBe('{"move":"e2→e4"}');
+    expect(n).toBe(3);
+  });
+
+  it('if it stays busy, the error says it is busy (not a model problem)', async () => {
+    retryPolicy.delays = [0, 0, 0];
+    mockFetch(503, { error: { code: 503, message: 'This model is currently experiencing high demand.' } });
+    const err = askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'k' }, 'S', 'U', signal);
+    await expect(err).rejects.toThrow(/busy or having trouble/);
+    await expect(askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'k' }, 'S', 'U', signal)).rejects.not.toThrow(/Find my models/);
+  });
+
+  it('a bad key is not retried', async () => {
+    retryPolicy.delays = [0, 0, 0];
+    const calls = mockFetch(400, { error: { message: 'API key not valid. Please pass a valid API key.' } });
+    await expect(askGemini({ provider: 'gemini', model: 'gemini-3.8-flash', apiKey: 'bad' }, 'S', 'U', signal)).rejects.toThrow(/check the API key/);
+    expect(calls).toHaveLength(1);
   });
 });
