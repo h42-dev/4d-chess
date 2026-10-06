@@ -10,6 +10,9 @@ export const STANDARD_TTL: Rules['ttl'] = {
   p: { back: 1, fwd: 1 },
 };
 
+/** OG rules: how many erasures each piece gets per game. */
+export const STANDARD_ERASES: Record<PieceType, number> = { p: 1, n: 3, b: 3, r: 5, q: 5, k: 8 };
+
 /** "Simple" rules: the past is history you can see but not touch. */
 export const SIMPLE_RULES: Rules = {
   ttl: STANDARD_TTL,
@@ -27,6 +30,7 @@ export const SIMPLE_RULES: Rules = {
   quietDraw: 150,
   timeTravel: true,
   history: 'snapshot',
+  eraseLimit: STANDARD_ERASES,
 };
 
 /**
@@ -141,6 +145,8 @@ const key = (sq: number, dt: number) => (dt + 16384) * 512 + sq;
 export interface Ctx {
   s: GameState;
   occ: Map<number, Piece>;
+  /** erasures used per piece id, worked out when first needed */
+  used?: Map<number, number>;
 }
 
 export function ctxOf(s: GameState): Ctx {
@@ -170,10 +176,32 @@ export function at(c: Ctx, sq: number, L: number): Occupant {
   return null;
 }
 
+export const eraseLimitOf = (s: GameState, t: PieceType) => s.rules.eraseLimit?.[t] ?? STANDARD_ERASES[t];
+
+/** How many times each piece has erased someone from history this game (moves later voided don't count). */
+function usedErases(s: GameState): Map<number, number> {
+  const used = new Map<number, number>();
+  const voided = new Set(s.voided);
+  s.record.forEach((m, i) => {
+    if (m.erase !== undefined && !voided.has(i)) used.set(m.pid, (used.get(m.pid) ?? 0) + 1);
+  });
+  return used;
+}
+
+/** How many more erasures this piece may make. */
+export function erasesLeft(s: GameState, p: Piece, c?: Ctx): number {
+  const used = c ? (c.used ??= usedErases(s)) : usedErases(s);
+  return Math.max(0, eraseLimitOf(s, p.type) - (used.get(p.id) ?? 0));
+}
+
 /** The capture (or history erasure) of whatever stands on the target, if allowed. */
-function captureOf(o: Occupant, mover: Piece): Pick<Move, 'capture' | 'erase'> | null {
+function captureOf(c: Ctx, o: Occupant, mover: Piece): Pick<Move, 'capture' | 'erase'> | null {
   if (!o || o === GHOST || o.color === mover.color) return null;
-  if (isHist(o)) return o.type === 'k' ? null : { capture: o.id, erase: o.ply }; // past kings can't be captured
+  if (isHist(o)) {
+    // Past kings can't be captured, and each piece only has so many erasures.
+    if (o.type === 'k' || erasesLeft(c.s, mover, c) <= 0) return null;
+    return { capture: o.id, erase: o.ply };
+  }
   return { capture: o.id };
 }
 
@@ -273,7 +301,7 @@ function tryTarget(c: Ctx, p: Piece, to: number, L: number, out: Move[], mode: G
     if (wantQuiet(mode, p, L)) out.push({ pid: p.id, from: p.sq, fromDt: p.dt, to, toDt: L });
     return;
   }
-  const cap = captureOf(o, p);
+  const cap = captureOf(c, o, p);
   // Erasing history replays the whole game, so the bot's capture-only search leaves it out.
   if (cap && !(cap.erase !== undefined && mode === 'captures')) out.push({ pid: p.id, from: p.sq, fromDt: p.dt, to, toDt: L, ...cap });
 }
@@ -310,7 +338,7 @@ function pawnMoves(c: Ctx, p: Piece, lo: number, hi: number, out: Move[], mode: 
     }
     for (const t of hits) {
       const o = at(c, t, L);
-      const cap = captureOf(o, p);
+      const cap = captureOf(c, o, p);
       if (cap && !(cap.erase !== undefined && mode === 'captures')) {
         push({ pid: p.id, from: p.sq, fromDt: p.dt, to: t, toDt: L, ...cap });
       } else if (o === null && L === 0 && p.dt === 0 && c.s.ep === t && levelOf(t) === levelOf(p.sq)) {
@@ -560,7 +588,13 @@ function replayable(s: GameState, raw: Move): Move | null {
   pieceMoves(ctxOf(s), p, out, 'all');
   const m = out.find((x) => x.to === raw.to && x.toDt === raw.toDt && (x.promo ?? null) === (raw.promo ?? null) && (x.castle ?? null) === (raw.castle ?? null));
   // A replayed move never starts another rewrite; it simply lands there.
-  return m ? { ...m, erase: undefined, capture: m.erase !== undefined ? undefined : m.capture } : null;
+  if (m) return { ...m, erase: undefined, capture: m.erase !== undefined ? undefined : m.capture };
+  // The move that did the erasing still lands where its victim stood, even though the square is now
+  // empty (a pawn's diagonal capture onto an empty square isn't otherwise a move).
+  if (raw.erase !== undefined && at(ctxOf(s), raw.to, raw.toDt) === null) {
+    return { pid: raw.pid, from: raw.from, fromDt: raw.fromDt, to: raw.to, toDt: raw.toDt, ...(raw.promo ? { promo: raw.promo } : {}) };
+  }
+  return null;
 }
 
 /** A move is legal if afterwards your king still exists and can't be captured. */

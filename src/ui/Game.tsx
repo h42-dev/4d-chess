@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { adjudicate, applyMove, attackers, ctxOf, inCheck, isSafeFor, kingOf, legalMoves, levelName, levelOf, moveText, newGame, pseudoMoves, sideToMove, sqName, startLevel, ttlOf } from '../engine/game';
+import { adjudicate, applyMove, attackers, ctxOf, eraseLimitOf, erasesLeft, inCheck, isLiving, isSafeFor, kingOf, legalMoves, levelName, levelOf, moveText, newGame, pseudoMoves, sideToMove, sqName, startLevel, ttlOf } from '../engine/game';
 import type { Color, GameState, Move, Piece, Result, TimeEvent } from '../engine/types';
 import { Board, type Focus } from './Board';
 import { rulesSummary } from './HouseRules';
 import { LevelBar } from './LevelBar';
 import type { GameConfig } from './Menu';
 import { Pc } from './Pc';
-import { colorName, describeMove, era, NAME, rel, relWords } from './pieces';
+import { colorName, describeMove, era, fromChar, NAME, rel, relWords } from './pieces';
 import { useSettings } from './settings';
 import { play as sfx } from './sound';
 import { RIBBON_FUTURE, TimeRibbon } from './TimeRibbon';
@@ -426,6 +426,14 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     if (picker) return clearPickerOnly();
     if (!canAct) return;
     if (selected && goTo(sq)) return;
+    if (selected && focus !== null && focus < 0 && isLiving(cur) && erasesLeft(cur, selected) === 0) {
+      const ch = cur.snapshots[cur.ply + focus]?.[sq];
+      const h = ch ? fromChar(ch) : null;
+      if (h && h.color !== selected.color) {
+        const limit = eraseLimitOf(cur, selected.type);
+        return setWhy(`Your ${NAME[selected.type].toLowerCase()} has used ${limit === 1 ? 'its only erase' : `all ${limit} of its erases`} this game, so it can't erase anyone else from history.`);
+      }
+    }
     clearSelection();
   };
 
@@ -438,8 +446,11 @@ export function Game({ config, online, onMenu, onRules }: Props) {
         if (!goTo(p.sq, null, true)) clearSelection();
         return;
       }
-      const caps = optionsAt(p.sq).filter((m) => m.capture === p.id);
+      // Clicking a piece takes it in its own time. Erasing its past self is offered separately
+      // (the × in the corner, or the board from back then), never picked by accident.
+      const caps = optionsAt(p.sq).filter((m) => m.capture === p.id && m.erase === undefined && m.toDt === p.dt);
       if (caps.length) return choose(caps);
+      if (optionsAt(p.sq).some((m) => m.erase !== undefined)) return void goTo(p.sq, null, true);
       // Your own piece on a square the selected piece can reach in another time: ask, with
       // "select this piece instead" as the first choice.
       if (p.color === turn && optionsAt(p.sq).length) return void goTo(p.sq, p);
@@ -1023,6 +1034,18 @@ function SelectedCard({ selected, reach, canAct, result, cur, view }: SelectedPr
           <span className="past">◂ {t.back} back</span>
           <span className="ttl-label">time travel limit</span>
           <span className="future">{t.fwd} ahead ▸</span>
+        </div>
+      )}
+      {cur.rules.timeTravel && cur.rules.history === 'living' && (
+        <div className="erase-line" title="How many more pieces this one can erase from history this game">
+          <span className="erase-pips" aria-hidden>
+            {Array.from({ length: eraseLimitOf(cur, selected.type) }, (_, i) => (
+              <i key={i} className={i < erasesLeft(cur, selected) ? 'on' : ''} />
+            ))}
+          </span>
+          <span>
+            {erasesLeft(cur, selected)} of {eraseLimitOf(cur, selected.type)} erase{eraseLimitOf(cur, selected.type) === 1 ? '' : 's'} left
+          </span>
         </div>
       )}
       <p>

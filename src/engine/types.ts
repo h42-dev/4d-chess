@@ -71,6 +71,12 @@ export interface Rules {
    * pulled back to the present once they fall further behind than their time travel limit.
    */
   history: 'snapshot' | 'living';
+  /**
+   * OG rules: how many times each piece may erase a piece from history in one game. Counted per
+   * piece; a promoted pawn keeps what it has used and takes its new type's limit.
+   * (Missing in games saved before this rule existed: the standard limits apply.)
+   */
+  eraseLimit?: Record<PieceType, number>;
 }
 
 /** OG rules: a piece removed from history from turn `ply` onward. */

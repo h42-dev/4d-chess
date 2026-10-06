@@ -60,6 +60,10 @@ where the past can be seen but not touched (past pieces only block squares, and 
 - Capturing a piece on a past board (not a king) **erases it from history** from that turn on. The game replays every
   move since without it: it vanishes from the present, anything it captured later comes back, and moves that no
   longer make sense didn't happen (crossed out in the move list).
+- Each piece may only erase a limited number of times per game: **pawn 1, knight 3, bishop 3, rook 5, queen 5,
+  king 8** (changeable in house rules). Counts are per piece; a promoted pawn keeps its count and takes the new limit.
+- Clicking an enemy piece takes it normally, in its own time; erasing its past self is a separate choice (the × in
+  the corner of its square, or the board from back then).
 - Pieces on past boards don't move or attack; only pieces that travelled there act.
 - Engine: every game keeps its move record; an erasure replays it (`replay()` in `src/engine/game.ts`).
 

@@ -1,4 +1,4 @@
-import { SIMPLE_RULES, STANDARD_RULES } from '../engine/game';
+import { SIMPLE_RULES, STANDARD_ERASES, STANDARD_RULES } from '../engine/game';
 import type { PieceType, Rules } from '../engine/types';
 import { NAME } from './pieces';
 import { Pc } from './Pc';
@@ -66,6 +66,9 @@ function Toggle({ on, onChange, title, note }: { on: boolean; onChange: (v: bool
 /** Edit the rules for a house-rules game. */
 export function HouseRules({ value, onChange }: { value: Rules; onChange: (r: Rules) => void }) {
   const setTtl = (t: PieceType, side: 'back' | 'fwd', v: number) => onChange({ ...value, ttl: { ...value.ttl, [t]: { ...value.ttl[t], [side]: v } } });
+  const erases = value.eraseLimit ?? STANDARD_ERASES;
+  const living = value.history === 'living';
+  const setErases = (t: PieceType, v: number) => onChange({ ...value, eraseLimit: { ...erases, [t]: v } });
   const active = PRESETS.find((p) => JSON.stringify(p.rules) === JSON.stringify(value));
 
   return (
@@ -85,11 +88,12 @@ export function HouseRules({ value, onChange }: { value: Rules; onChange: (r: Ru
         note="Turn it off for chess without the time dimension"
       />
 
-      <div className={`ttl-edit${value.timeTravel ? '' : ' off'}`}>
+      <div className={`ttl-edit${value.timeTravel ? '' : ' off'}${living ? ' with-erases' : ''}`}>
         <div className="ttl-edit-head">
           <span>Piece</span>
           <span className="past">Back in time</span>
           <span className="future">Forward in time</span>
+          {living && <span className="erase" title="How many pieces each piece may erase from history per game">Erases</span>}
         </div>
         {ORDER.map((t) => (
           <div key={t} className="ttl-edit-row">
@@ -99,6 +103,7 @@ export function HouseRules({ value, onChange }: { value: Rules; onChange: (r: Ru
             </span>
             <Stepper value={value.ttl[t].back} onChange={(v) => setTtl(t, 'back', v)} label={`${NAME[t]} back`} tone="past" />
             <Stepper value={value.ttl[t].fwd} onChange={(v) => setTtl(t, 'fwd', v)} label={`${NAME[t]} forward`} tone="future" />
+            {living && <Stepper value={erases[t]} onChange={(v) => setErases(t, v)} label={`${NAME[t]} erases`} tone="erase" />}
           </div>
         ))}
       </div>
@@ -151,6 +156,8 @@ export function rulesSummary(r: Rules): string {
     const changed = ORDER.filter((t) => r.ttl[t].back !== STANDARD_RULES.ttl[t].back || r.ttl[t].fwd !== STANDARD_RULES.ttl[t].fwd);
     if (changed.length === ORDER.length) bits.push('custom time limits for every piece');
     else if (changed.length) bits.push(`custom limits for ${changed.map((t) => NAME[t].toLowerCase()).join(', ')}`);
+    const e = r.eraseLimit ?? STANDARD_ERASES;
+    if (ORDER.some((t) => e[t] !== STANDARD_ERASES[t])) bits.push(ORDER.every((t) => e[t] === 0) ? 'no erasing' : 'custom erase limits');
     if (!r.horizon) bits.push('no horizon');
     if (r.futureRunning) bits.push('future pieces can run ahead');
     if (r.allowPass) bits.push('passing allowed');

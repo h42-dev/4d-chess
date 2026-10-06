@@ -1,4 +1,4 @@
-import { STANDARD_RULES } from '../engine/game';
+import { STANDARD_ERASES, STANDARD_RULES } from '../engine/game';
 import type { PieceType, Rules as RuleSet } from '../engine/types';
 import { NAME } from './pieces';
 import { Pc } from './Pc';
@@ -61,6 +61,8 @@ export function Rules({ onClose, rules = STANDARD_RULES, house = false }: { onCl
             <li>Going back in time puts you on the <b>real board from then</b>. Go back to T=0 and every piece is in its starting position (on the middle level in 4D Chess).</li>
             <li>You can land on a past square if it was empty back then, or capture the piece that stood there (not a king).</li>
             <li>Capturing a piece on a past board <b>erases it from history</b> from that turn on. Every move since is replayed without it: it vanishes from the present, anything it captured later comes back, and moves that no longer make sense didn't happen (they're crossed out in the move list).</li>
+            <li>Each piece can only erase so many times per game: <b>pawn 1, knight 3, bishop 3, rook 5, queen 5, king 8</b>{rules.eraseLimit && JSON.stringify(rules.eraseLimit) !== JSON.stringify(STANDARD_ERASES) ? ' (house rules may change these)' : ''}. Select a piece to see how many it has left. A pawn that promotes keeps its count and gets its new piece's limit.</li>
+            <li>Clicking an enemy piece takes it normally, in its own time. To erase it from the past instead, use the <b>×</b> in the corner of its square, or open the board from back then.</li>
             <li>A piece that goes back <b>stays on that board</b>, so it falls one turn further behind each turn. Once it's further back than its time travel limit it's <b>pulled back</b> to the present on the same square, and lost if that square is taken.</li>
             <li>Pieces on past boards don't move or attack. Only pieces that travelled there can act.</li>
           </ul>

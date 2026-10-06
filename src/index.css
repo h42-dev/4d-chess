@@ -1028,6 +1028,14 @@ nav.top {
 .ttl-edit-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 .ttl-edit-head .past { color: var(--past-hi); text-align: center; }
 .ttl-edit-head .future { color: var(--future-hi); text-align: center; }
+.ttl-edit.with-erases .ttl-edit-head, .ttl-edit.with-erases .ttl-edit-row { grid-template-columns: 1fr auto auto auto; }
+.ttl-edit-head .erase { color: var(--danger, #e0605a); text-align: center; }
+.stepper.erase { border-color: color-mix(in srgb, var(--danger, #e0605a) 60%, var(--line)); }
+@media (max-width: 480px) { .ttl-edit .stepper button { padding: 4px 7px; } .ttl-edit .stepper input { width: 30px; } }
+.erase-line { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+.erase-pips { display: inline-flex; gap: 3px; }
+.erase-pips i { width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid var(--danger, #e0605a); }
+.erase-pips i.on { background: var(--danger, #e0605a); }
 .ttl-edit-row .who { display: flex; align-items: center; gap: 8px; font-size: 14px; }
 .ttl-edit-row .who .piece { font-size: 22px; }
 .stepper { display: inline-flex; align-items: center; border-radius: 9px; overflow: hidden; border: 1px solid var(--line); }
