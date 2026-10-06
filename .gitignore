@@ -25,3 +25,8 @@ dist-ssr
 
 # Firebase
 .firebase
+
+# Local AI agent skills (installed by firebase init)
+.agents/
+.claude/skills/
+skills-lock.json

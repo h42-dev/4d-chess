@@ -87,7 +87,11 @@ Win because the Google account hit its project quota). 4D Chess has its own host
 and the project's Firestore database; Pay to Win only uses the Realtime Database and its own site.
 
 - Config lives in `.env.local` (git-ignored); `.env.example` lists the keys.
-- Deploy: `npm run deploy` (builds, then deploys the `four-d-chess` site + Firestore rules only).
+- **Every push to `main` deploys automatically** (GitHub Actions: tests → build → Firebase Hosting).
+  Pull requests get a temporary preview link. The build reads the Firebase web config from the repo's
+  Actions variables, and deploys with the `FIREBASE_SERVICE_ACCOUNT_PAYTOWINGAME_A2B6F` secret.
+- Manual deploy: `npm run deploy` (builds, then deploys the `four-d-chess` site + Firestore rules). Firestore
+  rule changes still need this, since the GitHub deploy account can only publish the site.
 
 ## Layout
 
