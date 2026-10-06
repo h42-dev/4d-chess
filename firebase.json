@@ -1,0 +1,38 @@
+{
+  "firestore": {
+    "rules": "firestore.rules"
+  },
+  "hosting": {
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ],
+    "site": "four-d-chess"
+  },
+  "emulators": {
+    "auth": {
+      "port": 9299
+    },
+    "firestore": {
+      "port": 8282,
+      "websocketPort": 9250
+    },
+    "ui": {
+      "enabled": false
+    },
+    "hub": {
+      "port": 4450
+    },
+    "logging": {
+      "port": 4550
+    }
+  }
+}

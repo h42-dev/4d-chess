@@ -1,0 +1,33 @@
+{
+  "name": "4d-chess",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "emulators": "PATH=/opt/homebrew/opt/openjdk/bin:$PATH firebase emulators:start --only auth,firestore --project demo-4d-chess",
+    "dev:online": "VITE_FIREBASE_EMULATORS=1 vite --port 5189 --strictPort --host 127.0.0.1",
+    "deploy": "npm run build && firebase deploy --only hosting:four-d-chess,firestore:rules"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans-symbols-2": "^5.3.0",
+    "firebase": "^12.19.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "firebase-tools": "^15.32.1",
+    "oxlint": "^1.81.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.3"
+  }
+}

@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// Online games. Anyone signed in (anonymously) can read a game if they know its code; only the two
+// players can change it, a seat can only be claimed while it's empty, and a move can only be added
+// by the side whose turn it is. (Move legality itself is checked by both players' apps.)
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /games/{code} {
+      function signedIn() { return request.auth != null; }
+      function me() { return request.auth.uid; }
+      function isPlayer() { return resource.data.white == me() || resource.data.black == me(); }
+      function changesOnly(keys) { return request.resource.data.diff(resource.data).affectedKeys().hasOnly(keys); }
+
+      function movesOk() {
+        let before = resource.data.moves.size();
+        let after = request.resource.data.moves.size();
+        let mover = before % 2 == 0 ? resource.data.white : resource.data.black;
+        return after == before || (after == before + 1 && mover == me());
+      }
+
+      function claimingSeat() {
+        return !isPlayer() && (
+          (resource.data.white == null && request.resource.data.white == me() && request.resource.data.black == resource.data.black) ||
+          (resource.data.black == null && request.resource.data.black == me() && request.resource.data.white == resource.data.white)
+        );
+      }
+
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+        && (request.resource.data.white == me() || request.resource.data.black == me())
+        && request.resource.data.moves.size() == 0
+        && request.resource.data.status in ['waiting', 'active'];
+
+      allow update: if signedIn() && (
+        (isPlayer()
+          && changesOnly(['moves', 'times', 'lastMoveAt', 'status', 'result', 'drawOffer', 'rematch', 'names', 'updatedAt'])
+          && movesOk())
+        || (claimingSeat() && changesOnly(['white', 'black', 'names', 'status', 'updatedAt']))
+      );
+    }
+  }
+}
