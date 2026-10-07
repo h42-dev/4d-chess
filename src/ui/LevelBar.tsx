@@ -1,7 +1,7 @@
 import { levelName, sqName } from '../engine/game';
 import type { GameState, Move, Piece } from '../engine/types';
 import type { Focus } from './Board';
-import { colorName, era, NAME, relWords, squareAt } from './pieces';
+import { colorName, era, isLight, NAME, relWords, squareAt } from './pieces';
 import { Pc } from './Pc';
 import { useSettings } from './settings';
 
@@ -54,7 +54,7 @@ export function LevelBar({ state, level, focus, flipped, selected, targets, chec
             <span className="mini">
               {Array.from({ length: 64 }, (_, k) => {
                 const sq = z * 64 + squareAt(k >> 3, k & 7, flipped);
-                const light = (((sq >> 3) & 7) + (sq & 7)) % 2 === 1;
+                const light = isLight(sq, state.levels);
                 const here = pieces.filter((p) => p.sq === sq);
                 const top = here.find((p) => p.dt === 0) ?? here[0];
                 const target = hints && targets.has(sq);

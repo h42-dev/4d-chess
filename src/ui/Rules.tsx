@@ -8,7 +8,7 @@ const ORDER: PieceType[] = ['k', 'q', 'r', 'b', 'n', 'p'];
 const MOVES_3D: Record<PieceType, string> = {
   k: 'One step in any of the 26 directions, including straight up/down and 3D diagonals.',
   r: 'Any distance along one axis: across files, along ranks, or straight up and down through the levels.',
-  b: 'Any distance diagonally within any plane: the usual diagonals, plus diagonals that climb or drop a level each step.',
+  b: 'Any distance diagonally within any plane: the usual diagonals, plus diagonals that climb or drop a level each step. The square colours flip on each level, so a bishop always stays on its colour.',
   q: 'Everything the rook and bishop can do, plus the 3D diagonals (file, rank and level change together).',
   n: 'Two steps along one axis and one along another. Any two of file, rank and level.',
   p: 'One rank forward, optionally also up or down a level. Two straight ahead on its first move. Captures one rank forward and one file sideways, on its level or one up/down.',

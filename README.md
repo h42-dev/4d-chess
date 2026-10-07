@@ -74,6 +74,8 @@ where the past can be seen but not touched (past pieces only block squares, and 
 - Rook: along any one axis (file, rank, or straight up/down). Bishop: diagonals in any plane (two axes at
   once). Queen: rook + bishop + the 3D diagonals. King: one step in any of 26 directions. Knight: 2 along
   one axis and 1 along another.
+- Square colours flip on each level (as in 3D chess: colour follows file + rank + level), so a bishop always
+  stays on its colour, even when it changes level.
 - Pawn: one rank forward, optionally also up/down a level. Two straight ahead on its first move.
   Captures one rank forward and one file sideways, on its level or one up/down.
 - Castling stays on one level. En passant only on one level, in the present. Promotion on the last rank of any level.

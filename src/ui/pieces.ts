@@ -70,6 +70,14 @@ export function describeMove(s: GameState, m: Move): string {
 }
 
 /** The square shown at a given screen row/column. */
+/**
+ * Light or dark square. In 4D Chess the pattern flips on each level (as in 3D chess), so a square's
+ * colour follows file + rank + level and a bishop always stays on its colour, even moving between levels.
+ */
+export function isLight(sq: number, levels = 1): boolean {
+  return (((sq >> 3) & 7) + (sq & 7) + (sq >> 6) + Math.floor(levels / 2)) % 2 === 1;
+}
+
 export const squareAt = (row: number, col: number, flipped: boolean) => {
   const rank = flipped ? row : 7 - row;
   const file = flipped ? 7 - col : col;

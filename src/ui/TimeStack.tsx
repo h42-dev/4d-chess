@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { levelName, sqName } from '../engine/game';
 import type { GameState, Move, Piece } from '../engine/types';
 import type { Focus } from './Board';
-import { colorName, era, NAME, rel, relWords, squareAt } from './pieces';
+import { colorName, era, isLight, NAME, rel, relWords, squareAt } from './pieces';
 import { Pc } from './Pc';
 import { useSettings } from './settings';
 
@@ -129,7 +129,7 @@ export function TimeStack({ state, mode, focus, flipped, selected, targets, chec
             <div className={`plane ${row.tone}`}>
               {Array.from({ length: 64 }, (_, k) => {
                 const sq = row.level * 64 + squareAt(k >> 3, k & 7, flipped);
-                const light = (((sq >> 3) & 7) + (sq & 7)) % 2 === 1;
+                const light = isLight(sq, state.levels);
                 const here = state.pieces.filter((p) => p.sq === sq && (row.dt === null || p.dt === row.dt)).sort((a, b) => a.dt - b.dt);
                 const opts = targets.get(sq)?.filter((m) => row.dt === null || m.toDt === row.dt);
                 return (

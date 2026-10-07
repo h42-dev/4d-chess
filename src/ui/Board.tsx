@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { sqName } from '../engine/game';
 import type { GameState, Move, Piece } from '../engine/types';
-import { colorName, era, fromChar, NAME, rel, relWords, squareAt } from './pieces';
+import { colorName, era, fromChar, isLight, NAME, rel, relWords, squareAt } from './pieces';
 import { useSettings } from './settings';
 import { Pc } from './Pc';
 
@@ -58,7 +58,7 @@ export function Board(props: Props) {
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
       const sq = base + squareAt(row, col, flipped);
-      const light = (((sq >> 3) & 7) + (sq & 7)) % 2 === 1;
+      const light = isLight(sq, state.levels);
       const here = [...(bySq.get(sq) ?? [])];
       const opts = targets.get(sq);
       const quiet = opts?.filter((m) => m.capture === undefined) ?? [];
