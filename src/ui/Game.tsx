@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { adjudicate, applyMove, attackers, ctxOf, eraseLimitOf, erasesLeft, inCheck, isLiving, isSafeFor, kingOf, legalMoves, levelName, levelOf, moveText, newGame, pseudoMoves, sideToMove, sqName, startLevel, ttlOf } from '../engine/game';
+import { adjudicate, applyMove, at, attackers, canHit, ctxOf, eraseBlock, eraseLimitOf, isHist, erasesLeft, inCheck, isLiving, isSafeFor, kingOf, legalMoves, levelName, levelOf, moveText, newGame, pseudoMoves, sideToMove, sqName, startLevel, ttlOf } from '../engine/game';
 import type { Color, GameState, Move, Piece, Result, TimeEvent } from '../engine/types';
 import { Board, type Focus } from './Board';
 import { rulesSummary } from './HouseRules';
 import { LevelBar } from './LevelBar';
 import type { GameConfig } from './Menu';
 import { Pc } from './Pc';
-import { colorName, describeMove, era, fromChar, NAME, rel, relWords } from './pieces';
+import { colorName, describeMove, era, NAME, rel, relWords } from './pieces';
 import { useSettings } from './settings';
 import { play as sfx } from './sound';
 import { RIBBON_FUTURE, TimeRibbon } from './TimeRibbon';
@@ -438,12 +438,24 @@ export function Game({ config, online, onMenu, onRules }: Props) {
     if (picker) return clearPickerOnly();
     if (!canAct) return;
     if (selected && goTo(sq)) return;
-    if (selected && focus !== null && focus < 0 && isLiving(cur) && erasesLeft(cur, selected) === 0) {
-      const ch = cur.snapshots[cur.ply + focus]?.[sq];
-      const h = ch ? fromChar(ch) : null;
-      if (h && h.color !== selected.color) {
-        const limit = eraseLimitOf(cur, selected.type);
-        return setWhy(`Your ${NAME[selected.type].toLowerCase()} has used ${limit === 1 ? 'its only erase' : `all ${limit} of its erases`} this game, so it can't erase anyone else from history.`);
+    // Viewing a past board: say why a piece standing there can't be erased.
+    if (selected && focus !== null && focus < 0 && isLiving(cur)) {
+      const c = ctxOf(cur);
+      const o = at(c, sq, focus);
+      if (isHist(o) && o.color !== selected.color) {
+        const me = NAME[selected.type].toLowerCase();
+        const it = NAME[o.type].toLowerCase();
+        const reason = eraseBlock(c, selected, o);
+        if (reason === 'king') return setWhy('Kings can’t be captured in the past.');
+        if (reason === 'limit') {
+          const limit = eraseLimitOf(cur, selected.type);
+          return setWhy(`Your ${me} has used ${limit === 1 ? 'its only erase' : `all ${limit} of its erases`} this game, so it can't erase anyone else from history.`);
+        }
+        if (reason === 'escaped' && canHit(c, selected, sq, focus)) {
+          return setWhy(
+            `No ambushes from the past: your ${me} wasn't on ${sqName(selected.sq, cur.levels)} yet when that ${it} last had a turn before T=${cur.ply + focus}, so it never had a chance to get out of the way. You can only erase a piece that stayed in danger through its turn.`,
+          );
+        }
       }
     }
     clearSelection();

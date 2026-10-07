@@ -319,7 +319,7 @@ describe('OG rules (living history)', () => {
   const find = (s: GameState, from: string, fromDt: number, to: string, toDt: number) =>
     legalMoves(s).find((m) => m.from === sq(from) && m.fromDt === fromDt && m.to === sq(to) && m.toDt === toDt);
 
-  it('going back to T=0 lands on the starting position, and capturing there erases the piece from the present', () => {
+  it('going back to T=0 lands on the starting position, but a traveller there cannot ambush anyone', () => {
     // 1. e4 a6: the queen can now leave d1 through e2, and drops back to T=0 on h5.
     let s = og(['e2e4', 'a7a6']);
     const back = find(s, 'd1', 0, 'h5', -2);
@@ -329,15 +329,39 @@ describe('OG rules (living history)', () => {
     // The queen is still on the T=0 board (now 4 turns back), surrounded by the starting position.
     const q = s.pieces.find((p) => p.type === 'q' && p.color === 'w')!;
     expect(q.dt).toBe(-4);
-    // On that board f7 still has Black's pawn; taking it rewrites history.
-    const take = find(s, 'h5', -4, 'f7', -4);
-    expect(take?.erase).toBe(0);
-    const fPawn = take!.capture!;
-    const { state, events } = applyMove(s, take!);
-    expect(events[0]).toMatchObject({ kind: 'erased', type: 'p', color: 'b' });
-    expect(state.pieces.some((p) => p.id === fPawn)).toBe(false); // gone from the present
-    expect(state.snapshots[0][sq('f7')]).toBe('.'); // and from history
-    expect(state.pieces.find((p) => p.id === q.id)).toMatchObject({ sq: sq('f7'), dt: -5 });
+    // f7 still has Black's pawn on that board, but the queen was never on h5 while Black had a turn,
+    // so the pawn never had a chance to get out of the way: no erasing it.
+    expect(find(s, 'h5', -4, 'f7', -4)).toBeUndefined();
+  });
+
+  it('no ambushes: a threat the victim escaped straight away cannot be cashed in from the past', () => {
+    const pieces = [
+      { id: 1, type: 'k', color: 'w', sq: sq('a1'), dt: 0, moved: true },
+      { id: 2, type: 'b', color: 'w', sq: sq('c1'), dt: 0, moved: true },
+      { id: 3, type: 'k', color: 'b', sq: sq('h8'), dt: 0, moved: true },
+      { id: 4, type: 'n', color: 'b', sq: sq('e5'), dt: 0, moved: true },
+    ] as Piece[];
+    // The bishop attacks the knight; the knight runs away.
+    const s = play(['a1a2', 'h8g8', 'c1b2', 'e5c4'], fromPieces(pieces, 1, OG_RULES));
+    expect(legalMoves(s).filter((m) => m.pid === 2 && m.to === sq('e5') && m.erase !== undefined)).toEqual([]);
+  });
+
+  it('a piece left in danger through its turn can have its history undone', () => {
+    const pieces = [
+      { id: 1, type: 'k', color: 'w', sq: sq('a1'), dt: 0, moved: true },
+      { id: 2, type: 'b', color: 'w', sq: sq('c1'), dt: 0, moved: true },
+      { id: 3, type: 'k', color: 'b', sq: sq('h8'), dt: 0, moved: true },
+      { id: 4, type: 'n', color: 'b', sq: sq('e5'), dt: 0, moved: true },
+    ] as Piece[];
+    // The bishop attacks the knight; Black moves the king instead, then the knight leaves.
+    const s = play(['a1a2', 'h8g8', 'c1b2', 'g8f8', 'a2a1', 'e5c4'], fromPieces(pieces, 1, OG_RULES));
+    // On the board from after Black ignored the threat (T=4), the knight is fair game.
+    const take = find(s, 'b2', 0, 'e5', -2);
+    expect(take?.erase).toBe(4);
+    const after = applyMove(s, take!).state;
+    expect(after.pieces.some((p) => p.id === 4)).toBe(false);
+    // ...but not on the board from just after the bishop arrived, before Black had a turn.
+    expect(find(s, 'b2', 0, 'e5', -3)).toBeUndefined();
   });
 
   it('erasing a piece brings back what it captured later, and its later moves never happen', () => {

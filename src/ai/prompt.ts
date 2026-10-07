@@ -30,6 +30,7 @@ export function systemPrompt(s: GameState): string {
         '- OG RULES (living history): past boards are real. Going back to turn T puts your piece on the board exactly as it was at T (at T=0, the starting position). A piece that goes back stays on that board, so it falls one turn further behind every turn, and it is pulled back to the present (same square) once it is further back than its back limit; if that square is taken it is lost.',
         '- On a past board you can capture the pieces that stood there (except kings). That erases the piece from history from that turn on, and every move since is replayed without it, so it disappears from the present and anything it captured later comes back. Captures like this are marked with × in the move list.',
         '- Each piece may erase only a limited number of times per game (standard: pawn 1, knight 3, bishop 3, rook 5, queen 5, king 8). The legal move list already leaves out erasures a piece has no allowance left for.',
+        '- No ambushes from the past: a piece can only erase a victim if it was already standing on its current square before the victim\'s last turn back then (the victim could have escaped and didn\'t). The legal move list already applies this.',
       );
     }
   } else {

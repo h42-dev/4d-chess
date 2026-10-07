@@ -194,14 +194,30 @@ export function erasesLeft(s: GameState, p: Piece, c?: Ctx): number {
   return Math.max(0, eraseLimitOf(s, p.type) - (used.get(p.id) ?? 0));
 }
 
+/**
+ * Why `mover` can't erase the past piece `o` standing on `sq`, or null if it can.
+ * - king: past kings can't be captured
+ * - limit: this piece has used all its erasures
+ * - escaped: no ambushes from the past. The attacker must already have been standing on its
+ *   current square (on the board in play) before the victim's last turn back then, so the victim
+ *   knew the danger and had a chance to stay out of it. A threat it escaped straight away can't be
+ *   cashed in later.
+ */
+export function eraseBlock(c: Ctx, mover: Piece, o: HistPiece): 'king' | 'limit' | 'escaped' | null {
+  if (o.type === 'k') return 'king';
+  if (erasesLeft(c.s, mover, c) <= 0) return 'limit';
+  // The victim's last turn before board T: the latest ply k < T on which its side moved.
+  const victimMovesOnEven = o.color === 'w';
+  const k = (o.ply - 1) % 2 === 0 === victimMovesOnEven ? o.ply - 1 : o.ply - 2;
+  const before = k >= 0 ? c.s.snapIds[k] : undefined;
+  if (!before || before[mover.sq] !== mover.id) return 'escaped';
+  return null;
+}
+
 /** The capture (or history erasure) of whatever stands on the target, if allowed. */
 function captureOf(c: Ctx, o: Occupant, mover: Piece): Pick<Move, 'capture' | 'erase'> | null {
   if (!o || o === GHOST || o.color === mover.color) return null;
-  if (isHist(o)) {
-    // Past kings can't be captured, and each piece only has so many erasures.
-    if (o.type === 'k' || erasesLeft(c.s, mover, c) <= 0) return null;
-    return { capture: o.id, erase: o.ply };
-  }
+  if (isHist(o)) return eraseBlock(c, mover, o) ? null : { capture: o.id, erase: o.ply };
   return { capture: o.id };
 }
 

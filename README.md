@@ -62,6 +62,9 @@ where the past can be seen but not touched (past pieces only block squares, and 
   longer make sense didn't happen (crossed out in the move list).
 - Each piece may only erase a limited number of times per game: **pawn 1, knight 3, bishop 3, rook 5, queen 5,
   king 8** (changeable in house rules). Counts are per piece; a promoted pawn keeps its count and takes the new limit.
+- **No ambushes from the past:** you can only erase a piece if your attacker was already standing where it is now
+  before that piece's last turn back then. A piece that escapes a threat straight away is safe; one left in danger
+  through its turn can have its history undone.
 - Clicking an enemy piece takes it normally, in its own time; erasing its past self is a separate choice (the × in
   the corner of its square, or the board from back then).
 - Pieces on past boards don't move or attack; only pieces that travelled there act.

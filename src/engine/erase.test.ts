@@ -20,7 +20,7 @@ it('the piece that erases always lands where its victim stood (pawns included)',
       s = next;
     }
   }
-  expect(erases).toBeGreaterThan(50);
+  expect(erases).toBeGreaterThan(20);
 }, 60_000);
 
 it('each piece only has so many erasures (a pawn gets one)', async () => {
@@ -34,9 +34,11 @@ it('each piece only has so many erasures (a pawn gets one)', async () => {
     { id: 5, type: 'p' as const, color: 'b' as const, sq: 36, dt: 0, moved: true },
   ];
   let s = fromPieces(pieces, 1, STANDARD_RULES);
-  // two quiet king moves so there is a past to go back to
+  // quiet king moves so there is a past to go back to (with Black having had a turn)
   s = apply(s, { pid: 1, from: 4, fromDt: 0, to: 5, toDt: 0 }).state;
   s = apply(s, { pid: 2, from: 60, fromDt: 0, to: 61, toDt: 0 }).state;
+  s = apply(s, { pid: 1, from: 5, fromDt: 0, to: 4, toDt: 0 }).state;
+  s = apply(s, { pid: 2, from: 61, fromDt: 0, to: 60, toDt: 0 }).state;
   const pawn = s.pieces.find((p) => p.id === 3)!;
   expect(erasesLeft(s, pawn)).toBe(1);
   const erase = legal(s).find((m) => m.pid === 3 && m.erase !== undefined)!;
@@ -45,6 +47,6 @@ it('each piece only has so many erasures (a pawn gets one)', async () => {
   const after = s.pieces.find((p) => p.id === 3)!;
   expect(after.sq).toBe(erase.to); // it lands where its victim stood
   expect(erasesLeft(s, after)).toBe(0);
-  s = apply(s, { pid: 2, from: 61, fromDt: 0, to: 60, toDt: 0 }).state;
+  s = apply(s, { pid: 2, from: 60, fromDt: 0, to: 61, toDt: 0 }).state;
   expect(legal(s).filter((m) => m.pid === 3 && m.erase !== undefined)).toEqual([]);
 });
