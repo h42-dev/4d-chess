@@ -1,18 +1,75 @@
 # 4D Chess
 
+**Chess through time and space. Play it at [four-d-chess.web.app](https://four-d-chess.web.app).**
+
 Two games in one:
 
 - **Time Travel Chess**: the normal 8×8 board plus time (3 dimensions).
 - **4D Chess**: an 8×8 board with 3 levels of height, plus time (4 dimensions).
 
 Pieces can jump into the past or the future, and two pieces can share a square as long as they're in
-different times.
+different times. Capture a piece in the past and it's erased from history: the game replays every move
+since without it.
+
+![Time Travel Chess: a queen 8 turns in the past (purple) and two rooks 3 turns in the future (cyan)](docs/screenshots/time-travel.jpg)
+
+| 3D time stack | 4D Chess: three levels plus time |
+| --- | --- |
+| ![The 3D time stack: future, present and past boards stacked](docs/screenshots/time-stack.jpg) | ![4D Chess: upper, middle and lower levels](docs/screenshots/4d-levels.jpg) |
+
+Play against a built-in bot, a friend on the same screen, a friend online with a link, or an AI model of your
+choice (Claude, ChatGPT, Gemini, OpenRouter, a local model, or your own bot over HTTP). You can also watch two AIs
+play each other.
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173
 npm test         # rules engine tests
 ```
+
+## How it works
+
+```mermaid
+flowchart LR
+  UI["React UI<br/>board · time ribbon · 3D stack"] --> Engine
+  Bot["Built-in bot<br/>alpha-beta, Web Worker"] --> Engine
+  AI["AI players<br/>Claude · OpenAI · Gemini · Bot API"] -->|"legal moves in,<br/>one move out"| Engine
+  Engine["Rules engine<br/>pure TypeScript, no UI"]
+  Online["Firestore<br/>move list only"] <-->|"moves"| UI
+  Engine -. "every client replays<br/>every move" .- Online
+```
+
+- **The rules engine is pure TypeScript with no UI code** (`src/engine/game.ts`). The UI, the bot, the AI
+  adapters and online play all go through the same `legalMoves` / `applyMove`, so there's one definition of
+  what's legal.
+- **A game is its move record.** The state keeps the starting pieces, every move played and a snapshot of
+  the board after each turn. "Erasing a piece from history" removes it from that turn on and replays the record.
+  Moves that no longer make sense are voided (crossed out in the move list) rather than deleted.
+- **One board model for 2D and 3D.** A square is `level × 64 + rank × 8 + file`, and each piece stores its
+  time as `dt`, an offset from the present. Time Travel Chess is simply the one-level case, so both games share
+  the same move generation.
+- **Rules are data.** The time limits, horizon, erase limits, history model and draw rule live in a `Rules`
+  object. "Simple" vs "OG" rules and the house-rules editor are just different values, not separate code paths.
+- **The bot runs in a Web Worker** (alpha-beta search with time limits per difficulty), so the board never
+  freezes while it thinks.
+- **AI models never invent moves.** They get the position as text plus the full list of legal moves, and must
+  answer with one of them as JSON. A wrong answer gets one retry with feedback, then the built-in bot can step in.
+- **Online play stores only the move list.** Firestore security rules enforce seats and turn order, and both
+  players' apps replay every move through the engine and ignore anything illegal. There's no game server to
+  run or pay for.
+- **55 tests** cover the rules (time travel, arrivals, erasing history and replay), the AI prompts and
+  provider request shapes.
+
+### Design problems the rules had to solve
+
+Time travel breaks chess in some fun ways. Each fix is now a rule (see "Rules as implemented"):
+
+| Problem found in play | Fix |
+| --- | --- |
+| A king could keep hopping into the future and never be caught | **TTL is a horizon** (no piece can be further from the present than its time limit), and **time catches up** (a piece already in the future can't jump further ahead) |
+| Hopping one turn ahead on the same square was a free pass | **No passing** |
+| The hard bot parked its queen in the past and erased pieces endlessly | **Erase limits per piece type** (pawn 1 … king 8) |
+| Pieces could be erased by an attacker that only arrived after the fact | **No ambushes from the past**: an erase only counts if the attacker was already there before the victim's turn |
 
 ## Rules as implemented
 
@@ -154,18 +211,21 @@ Moves sync live through Firebase (Firestore + anonymous sign-in). Clocks, draw o
 (colours swapped) and spectators (a third person with the link) all work. Reopening the link in the same
 browser puts you back in your seat.
 
-- `firestore.rules`: only the two players can change a game, a seat can only be taken while empty, and a
-  move can only be added by the side to move, one at a time. Both apps also replay every move through
-  the rules engine and ignore anything illegal.
+- `firestore.rules`: only the two players can change a game, a seat can only be taken while empty, a
+  move can only be added by the side to move, one at a time, and moves already played can never be changed
+  or removed. Both apps also replay every move through the rules engine and ignore anything illegal.
 - Local testing without a Firebase project: `npm run emulators` (needs Java) and `npm run dev:online`, then
   open `http://localhost:5189` and `http://127.0.0.1:5189` as the two players (different addresses give
   different anonymous users).
+- **Trust model (known limitation):** there's no game server, so the database trusts the two players' apps.
+  The rules stop strangers, out-of-turn moves and rewriting history, but a player running a modified app
+  could still declare a result (e.g. claim the other side resigned). That's fine for friendly games. For ranked play, a Cloud Function
+  would replay each move through the engine before accepting it.
 
 ### Live site
 
-**https://four-d-chess.web.app**, hosted in the Firebase project `paytowingame-a2b6f` (shared with Pay to
-Win because the Google account hit its project quota). 4D Chess has its own hosting site (`four-d-chess`)
-and the project's Firestore database; Pay to Win only uses the Realtime Database and its own site.
+**https://four-d-chess.web.app**, hosted on Firebase (its own hosting site, `four-d-chess`, in the
+Firebase project `paytowingame-a2b6f`, which it shares with another of my projects).
 
 - Config lives in `.env.local` (git-ignored); `.env.example` lists the keys.
 - **Every push to `main` deploys automatically** (GitHub Actions: tests → build → Firebase Hosting).
@@ -188,3 +248,8 @@ and the project's Firestore database; Pay to Win only uses the Realtime Database
 2. ✅ 4D Chess (height), house rules, settings, clocks
 3. ✅ Online games with friends through share links (Firebase)
 4. Tune the bot's time-travel play, piece art
+
+## License
+
+© 2026 Henry Harnischmacher. All rights reserved. The code is public to read and learn from, but not licensed
+for reuse. See [LICENSE](LICENSE).
