@@ -249,6 +249,12 @@ Firebase project `paytowingame-a2b6f`, which it shares with another of my projec
 3. ✅ Online games with friends through share links (Firebase)
 4. Tune the bot's time-travel play, piece art
 
+## About
+
+Built by Henry Harnischmacher. I design and build systems for businesses through
+[Strategy Led Technology](https://strategyledtechnology.vercel.app/?ref=github-4d-chess). Get in touch there if you'd
+like something built.
+
 ## License
 
 © 2026 Henry Harnischmacher. All rights reserved. The code is public to read and learn from, but not licensed

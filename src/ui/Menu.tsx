@@ -339,6 +339,11 @@ export function Menu({ onStart, onOnline, onRules }: Props) {
       </div>
 
       <button className="link" onClick={onRules}>How to play →</button>
+
+      <p className="credit">
+        Made by Henry Harnischmacher · I design and build systems for businesses.{' '}
+        <a href="https://strategyledtechnology.vercel.app/?ref=4d-chess" target="_blank" rel="noopener">Strategy Led Technology →</a>
+      </p>
     </div>
   );
 }
