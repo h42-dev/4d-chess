@@ -17,8 +17,9 @@ service cloud.firestore {
         let after = request.resource.data.moves.size();
         let mover = before % 2 == 0 ? resource.data.white : resource.data.black;
         // The list can only grow at the end: every earlier move must stay exactly as it was.
+        // (Slicing [0:0] is an error in rules, so an empty list is checked separately.)
         return after >= before
-          && request.resource.data.moves[0:before] == resource.data.moves
+          && (before == 0 || request.resource.data.moves[0:before] == resource.data.moves)
           && (after == before || (after == before + 1 && mover == me()));
       }
 
